@@ -1,0 +1,87 @@
+export const defaultBudgets = [
+  { id:'grana', year:2027, name:'GRANA', version:1, frequency:'Annuale', revision:0, typology:'CDC', type:'Ordinario', state:'Bozza', children:[
+    { id:'gra001', code:'GRA-001', name:'Produzione Grana', state:'Bozza' },
+    { id:'gra002', code:'GRA-002', name:'Grattugiato Grana', state:'Creato' },
+    { id:'gra003', code:'GRA-003', name:'Magazzino Grana', state:'Completato' }
+  ]},
+  { id:'trad', year:2027, name:'TRADIZIONALI', version:1, frequency:'Annuale', revision:0, typology:'CDC', type:'Ordinario', state:'Creato', children:[
+    { id:'tra001', code:'TRA-001', name:'Produzione Tradizionali A', state:'Bozza' },
+    { id:'tra002', code:'TRA-002', name:'Produzione Tradizionali B', state:'Creato' }
+  ]},
+  { id:'siero', year:2027, name:'SIERO', version:1, frequency:'Annuale', revision:0, typology:'CDC', type:'Ordinario', state:'Bozza', children:[
+    { id:'sie001', code:'SIE-001', name:'Produzione Siero A', state:'Bozza' },
+    { id:'sie002', code:'SIE-002', name:'Produzione Siero B', state:'Creato' }
+  ]},
+  { id:'burro', year:2027, name:'BURRO', version:1, frequency:'Annuale', revision:0, typology:'CDC', type:'Ordinario', state:'Completato', children:[
+    { id:'bur001', code:'BUR-001', name:'Produzione Burro', state:'Completato' }
+  ]},
+  { id:'staff', year:2027, name:'STAFF', version:1, frequency:'Annuale', revision:0, typology:'CDC', type:'Ordinario', state:'Bozza', children:[
+    { id:'stf001', code:'STF-001', name:'Amministrazione', state:'Bozza' },
+    { id:'stf002', code:'STF-002', name:'Laboratorio', state:'Creato' }
+  ]},
+  { id:'depuratore', year:2027, name:'DEPURATORE', version:1, frequency:'Vita utile', revision:0, typology:'COMMESSA', type:'Investimento', state:'Bozza', children:[
+    { id:'capdep01', code:'CAP-DEP-01', name:'Nuovo depuratore', state:'Bozza' },
+    { id:'capdep02', code:'CAP-DEP-02', name:'Adeguamento linea scarichi', state:'Bozza' }
+  ]}
+];
+
+export const ordinaryDemoRows = {
+  cost: [
+    { id:'c1', code:'GRA-001', description:'Produzione Grana', voice:'Salari e stipendi', account:'600100', values:[92000,92000,92000,92000,92000,92000,92000,92000,92000,92000,92000,92000] },
+    { id:'c2', code:'GRA-001', description:'Produzione Grana', voice:'Energia elettrica', account:'610210', values:[43000,41000,40000,42000,41000,43000,44000,45000,43000,40000,39000,39000] },
+    { id:'c3', code:'GRA-001', description:'Produzione Grana', voice:'Acquisto pezzi Grana', account:'1111000', values:[25000,25000,25000,25000,25000,25000,25000,25000,25000,25000,25000,25000] },
+    { id:'c4', code:'GRA-002', description:'Grattugiato Grana', voice:'Materiali di confezionamento', account:'610410', values:[30000,30000,30000,30000,30000,30000,30000,30000,30000,30000,30000,30000] },
+    { id:'c5', code:'GRA-002', description:'Grattugiato Grana', voice:'Personale linea grattugiato', account:'600120', values:[48000,48000,48000,48000,48000,48000,48000,48000,48000,48000,48000,48000] },
+    { id:'c6', code:'GRA-002', description:'Grattugiato Grana', voice:'Energia e manutenzione linea', account:'610230', values:[18000,18000,19000,19000,20000,20000,21000,21000,20000,19000,18000,18000] },
+    { id:'c7', code:'GRA-003', description:'Magazzino Grana', voice:'Gestione celle e stoccaggio', account:'610510', values:[22000,22000,22000,22000,22000,22000,22000,22000,22000,22000,22000,22000] },
+    { id:'c8', code:'GRA-003', description:'Magazzino Grana', voice:'Movimentazione e logistica', account:'610520', values:[35000,35000,35000,35000,35000,35000,35000,35000,35000,35000,35000,35000] },
+    { id:'c9', code:'GRA-003', description:'Magazzino Grana', voice:'Manutenzione attrezzature', account:'610530', values:[8000,8000,10000,8000,12000,8000,10000,8000,12000,8000,10000,8000] },
+    { id:'c10', code:'TRA-001', description:'Produzione Tradizionali A', voice:'Materie prime di produzione', account:'611100', values:[40000,40000,40000,40000,40000,40000,40000,40000,40000,40000,40000,40000] },
+    { id:'c11', code:'TRA-001', description:'Produzione Tradizionali A', voice:'Personale di reparto', account:'600210', values:[55000,55000,55000,55000,55000,55000,55000,55000,55000,55000,55000,55000] },
+    { id:'c12', code:'TRA-002', description:'Produzione Tradizionali B', voice:'Materiali di confezionamento', account:'611210', values:[28000,28000,28000,28000,28000,28000,28000,28000,28000,28000,28000,28000] },
+    { id:'c13', code:'TRA-002', description:'Produzione Tradizionali B', voice:'Personale di reparto', account:'600220', values:[42000,42000,42000,42000,42000,42000,42000,42000,42000,42000,42000,42000] },
+    { id:'c14', code:'SIE-001', description:'Produzione Siero A', voice:'Trattamento e concentrazione siero', account:'612100', values:[30000,30000,30000,30000,30000,30000,30000,30000,30000,30000,30000,30000] },
+    { id:'c15', code:'SIE-001', description:'Produzione Siero A', voice:'Energia impianto siero', account:'612110', values:[15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000] },
+    { id:'c16', code:'SIE-002', description:'Produzione Siero B', voice:'Trattamento sottoprodotti', account:'612200', values:[22000,22000,22000,22000,22000,22000,22000,22000,22000,22000,22000,22000] },
+    { id:'c17', code:'SIE-002', description:'Produzione Siero B', voice:'Trasporto e smaltimento', account:'612210', values:[12000,12000,12000,12000,12000,12000,12000,12000,12000,12000,12000,12000] },
+    { id:'c18', code:'BUR-001', description:'Produzione Burro', voice:'Panna destinata alla burrificazione', account:'613100', values:[90000,90000,90000,90000,90000,90000,90000,90000,90000,90000,90000,90000] },
+    { id:'c19', code:'BUR-001', description:'Produzione Burro', voice:'Personale e conduzione linea', account:'600310', values:[35000,35000,35000,35000,35000,35000,35000,35000,35000,35000,35000,35000] },
+    { id:'c20', code:'STF-001', description:'Amministrazione', voice:'Personale amministrativo', account:'600410', values:[65000,65000,65000,65000,65000,65000,65000,65000,65000,65000,65000,65000] },
+    { id:'c21', code:'STF-001', description:'Amministrazione', voice:'Consulenze e servizi generali', account:'614100', values:[15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000,15000] },
+    { id:'c22', code:'STF-002', description:'Laboratorio', voice:'Personale di laboratorio', account:'600420', values:[50000,50000,50000,50000,50000,50000,50000,50000,50000,50000,50000,50000] },
+    { id:'c23', code:'STF-002', description:'Laboratorio', voice:'Reagenti e materiali di analisi', account:'614200', values:[18000,18000,18000,18000,18000,18000,18000,18000,18000,18000,18000,18000] }
+  ],
+  revenue: [
+    { id:'r1', code:'GRA-001', description:'Produzione Grana', voice:'Vendita diretta', account:'330000', values:[430000,440000,455000,450000,460000,470000,450000,440000,445000,450000,455000,455000] },
+    { id:'r2', code:'GRA-002', description:'Grattugiato Grana', voice:'Vendita grattugiato', account:'330110', values:[145000,145000,150000,150000,155000,155000,160000,155000,150000,145000,145000,145000] },
+    { id:'r3', code:'GRA-002', description:'Grattugiato Grana', voice:'Vendita private label', account:'330120', values:[55000,55000,60000,60000,65000,65000,65000,65000,60000,60000,55000,55000] },
+    { id:'r4', code:'GRA-003', description:'Magazzino Grana', voice:'Servizi di stagionatura e deposito', account:'330210', values:[70000,70000,70000,70000,70000,70000,70000,70000,70000,70000,70000,70000] },
+    { id:'r5', code:'TRA-001', description:'Produzione Tradizionali A', voice:'Vendita prodotti tradizionali A', account:'331100', values:[160000,160000,160000,160000,160000,160000,160000,160000,160000,160000,160000,160000] },
+    { id:'r6', code:'TRA-002', description:'Produzione Tradizionali B', voice:'Vendita prodotti tradizionali B', account:'331200', values:[130000,130000,130000,130000,130000,130000,130000,130000,130000,130000,130000,130000] },
+    { id:'r7', code:'SIE-001', description:'Produzione Siero A', voice:'Vendita siero concentrato', account:'332100', values:[85000,85000,85000,85000,85000,85000,85000,85000,85000,85000,85000,85000] },
+    { id:'r8', code:'SIE-002', description:'Produzione Siero B', voice:'Vendita derivati del siero', account:'332200', values:[65000,65000,65000,65000,65000,65000,65000,65000,65000,65000,65000,65000] },
+    { id:'r9', code:'BUR-001', description:'Produzione Burro', voice:'Vendita burro', account:'333100', values:[165000,165000,165000,165000,165000,165000,165000,165000,165000,165000,165000,165000] }
+  ]
+};
+export const investmentDemoRows = {
+  cost: [
+    { id:'ic1', code:'CAP-DEP-01', description:'Nuovo depuratore', voice:'Opere edili', account:'220100', values:[0,0,30000,0,0,30000,0,0,20000,0,0,0] },
+    { id:'ic2', code:'CAP-DEP-01', description:'Nuovo depuratore', voice:'Impianti elettrici', account:'220200', values:[0,0,0,0,0,30000,0,0,50000,0,0,0] },
+    { id:'ic3', code:'CAP-DEP-01', description:'Nuovo depuratore', voice:'Impianti tecnologici', account:'220300', values:[0,0,0,0,0,0,0,0,50000,0,30000,0] },
+    { id:'ic4', code:'CAP-DEP-02', description:'Adeguamento linea scarichi', voice:'Opere di adeguamento scarichi', account:'220110', values:[0,0,0,20000,0,0,20000,0,0,20000,0,0] },
+    { id:'ic5', code:'CAP-DEP-02', description:'Adeguamento linea scarichi', voice:'Sensori e telecontrollo', account:'220310', values:[0,0,0,0,15000,0,0,15000,0,0,15000,0] },
+    { id:'ic6', code:'CAP-DEP-02', description:'Adeguamento linea scarichi', voice:'Progettazione e collaudo', account:'220410', values:[0,10000,0,0,0,0,0,0,0,0,0,15000] }
+  ],
+  revenue: [
+    { id:'ir1', code:'CAP-DEP-01', description:'Nuovo depuratore', voice:'Contributo su investimento', account:'470100', values:[0,0,0,0,0,0,0,0,0,80000,0,0] },
+    { id:'ir2', code:'CAP-DEP-02', description:'Adeguamento linea scarichi', voice:'Contributo ambientale', account:'470110', values:[0,0,0,0,0,0,0,0,0,40000,0,0] }
+  ]
+};
+export const capexComponentsDefault = [
+  { id:'cp1', budgetRowId:'ic1', project:'CAP-DEP-01', component:'Opere edili', category:'Fabbricati', source:'Mezzi propri', life:20, state:'Approvato', payments:[30000,30000,20000,0], approved:80000, adjustment:0, depreciation:3333 },
+  { id:'cp2', budgetRowId:'ic2', project:'CAP-DEP-01', component:'Impianti elettrici', category:'Impianti', source:'Finanziamento', life:10, state:'In approvazione', payments:[0,30000,50000,0], approved:60000, adjustment:20000, depreciation:5333 },
+  { id:'cp3', budgetRowId:'ic3', project:'CAP-DEP-01', component:'Impianti tecnologici', category:'Impianti', source:'Leasing', life:8, state:'Pianificato', payments:[0,0,50000,30000], approved:80000, adjustment:0, depreciation:2167 },
+  { id:'cp4', budgetRowId:'ic4', project:'CAP-DEP-02', component:'Opere adeguamento scarichi', category:'Fabbricati', source:'Mezzi propri', life:15, state:'Approvato', payments:[20000,20000,20000,0], approved:60000, adjustment:0, depreciation:2000 },
+  { id:'cp5', budgetRowId:'ic5', project:'CAP-DEP-02', component:'Sensori e telecontrollo', category:'Impianti', source:'Finanziamento', life:8, state:'In approvazione', payments:[0,15000,15000,15000], approved:45000, adjustment:0, depreciation:2813 },
+  { id:'cp6', budgetRowId:'ic6', project:'CAP-DEP-02', component:'Progettazione e collaudo', category:'Oneri accessori', source:'Mezzi propri', life:10, state:'Pianificato', payments:[10000,0,0,15000], approved:25000, adjustment:0, depreciation:1250 }
+];
