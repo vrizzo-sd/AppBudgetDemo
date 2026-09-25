@@ -28,6 +28,7 @@ erDiagram
     BUDGET_ITEM ||--o| CAPEX_COMPONENT : collega
     CAPEX_PROJECT ||--o{ CAPEX_COMPONENT : contiene
     CAPEX_COMPONENT ||--o{ CAPEX_PAYMENT : programma
+    CAPEX_COMPONENT ||--o{ CAPEX_DEPRECIATION : ammortizza
     CAPEX_COMPONENT ||--o{ ADJUSTMENT : rettifica
 ```
 
@@ -101,17 +102,21 @@ Campi principali: `id`, `budget_level_id`, `code`, `description`, `status`, `sta
 
 Singola voce/cespite capitalizzabile mostrata nella tabella 4. Il campo `category` resta nello schema demo per compatibilità con i dati precedenti, ma non è più mostrato né richiesto nell'interfaccia.
 
-Campi principali: `id`, `capex_project_id`, `budget_item_id`, `description`, `category`, `funding_source`, `useful_life_years`, `approved_amount`, `status`.
+Campi principali: `id`, `capex_project_id`, `budget_item_id`, `description`, `category`, `funding_source`, `useful_life_years`, `purchase_date`, `in_service_date`, `payment_mode`, `first_due_date`, `installment_count`, `interval_months`, `annual_interest_rate`, `approved_amount`, `status`.
 
 `budget_item_id` collega la voce CAPEX alla voce già mostrata nelle tre tabelle del budget di investimento. Il dettaglio CAPEX non costituisce un secondo costo da sommare al budget.
 
 ### `capex_payment`
 
-Piano dei pagamenti della voce CAPEX: dodici periodi mensili nell'anno del budget, compresi i mesi con importo zero.
+Piano dei pagamenti della voce CAPEX: scadenze datate, anche distribuite su più anni. Per il vecchio piano manuale restano dodici mesi nell'anno del budget. La tabella 4 mostra sempre dodici colonne per l'anno selezionato, ma non limita il piano sottostante a dodici rate.
 
-Campi principali: `id`, `capex_component_id`, `due_date`, `amount`, `payment_status`.
+Campi principali: `id`, `capex_component_id`, `due_date`, `principal_cents`, `interest_cents`, `amount_cents`, `payment_status`. Vale `amount_cents = principal_cents + interest_cents`.
 
-Il CAPEX aggiornato è `approved_amount + rettifiche CAPEX approvate`. La somma dei dodici pagamenti deve coincidere con il CAPEX aggiornato. I mesi dei pagamenti possono differire dai mesi di imputazione del budget nella tabella 3; per la voce collegata deve restare uguale il totale annuale. L'ammortamento è un valore calcolato in base a data di entrata in funzione e vita utile; nel modello definitivo non dovrebbe essere inserito manualmente.
+Il CAPEX aggiornato è `approved_amount + rettifiche CAPEX approvate`. La somma del **capitale di tutte le rate**, indipendentemente dall'anno, deve coincidere con il CAPEX aggiornato. Gli interessi del finanziamento sono una voce distinta dalle immobilizzazioni e non aumentano il CAPEX. I mesi e gli anni dei pagamenti possono differire da quelli di imputazione del budget nella tabella 3; per la voce collegata deve restare uguale il totale del budget nell'anno dell'investimento, non ogni totale annuale dei pagamenti. Nel demo il finanziamento copre l'intero CAPEX; anticipo e copertura parziale non sono modellati.
+
+### `capex_depreciation`
+
+Una riga per voce CAPEX e anno. La quota è una **stima demo** calcolata in centesimi con criterio lineare dalla data di entrata in funzione e dalla vita utile, indipendentemente dalle rate. La regola contabile effettiva, il trattamento di cespiti non ancora entrati in funzione e l'integrazione con l'archivio cespiti Wingest devono essere validati prima dello sviluppo definitivo.
 
 ## 4. Vincoli essenziali
 

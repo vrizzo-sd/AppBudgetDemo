@@ -38,7 +38,7 @@
 
         <div class="section-head">
           <h2>Budget e livelli analitici</h2>
-          <span class="muted">La riga verde modifica l’intestazione; le righe sottostanti modificano o aprono il singolo livello.</span>
+          <span class="muted">La riga verde modifica l’intestazione o aggiunge una voce; le righe sottostanti modificano o aprono il singolo livello.</span>
         </div>
         <div class="table-wrap">
           <table aria-label="Gestione budget analitici">
@@ -107,9 +107,11 @@
         </div>
 
         <section id="capex-panel" class="panel investment-details" hidden aria-label="Dettaglio investimento">
-          <div class="panel-title">4. Investimenti · piano mensile dei pagamenti CAPEX</div>
+          <div class="panel-title">4. Investimenti · piano pluriennale dei pagamenti</div>
           <div class="capex-controls">
             <strong id="capex-scope-label">Commessa di capitalizzazione</strong>
+            <label for="capex-year">Anno</label><select id="capex-year" aria-label="Anno del piano CAPEX"></select>
+            <span class="muted" id="capex-year-summary"></span>
             <span class="capex-scroll-hint">Scorri la tabella verso destra per vedere tutti i mesi e i totali →</span>
             <div class="spacer"></div>
             <button class="btn" type="button" id="capex-adjustment">Rettifiche CAPEX</button>
@@ -123,7 +125,7 @@
               <tfoot id="capex-foot"></tfoot>
             </table>
           </div>
-          <div class="investment-note">La tabella 3 distribuisce il budget nei mesi; la tabella 4 pianifica i pagamenti CAPEX. I mesi possono essere diversi, ma il totale della voce deve coincidere. Non sommare di nuovo il CAPEX ai costi della tabella 3.</div>
+          <div class="investment-note">La tabella 3 espone il valore dell'investimento nel budget dell'anno. La tabella 4 mostra solo le rate dell'anno selezionato: il capitale complessivo si controlla sull'intero piano, anche quando dura più anni. Per un finanziamento bancario le rate comprendono capitale e interessi; gli interessi non aumentano il CAPEX.</div>
         </section>
       </section>
     </main>
@@ -165,7 +167,7 @@
           <div class="modal-body">
             <div class="field"><label for="voice-level">Livello / commessa</label><select id="voice-level" required></select></div>
             <div class="field"><label for="voice-nature">Tipo</label><select id="voice-nature"><option value="cost">Costo</option><option value="revenue">Ricavo</option></select></div>
-            <div class="field full"><label for="voice-description">Voce</label><input id="voice-description" placeholder="es. Manutenzione impianto" required></div>
+            <div class="field full"><label for="voice-description">Voce personalizzata</label><input id="voice-description" placeholder="Scrivi una voce, es. Manutenzione impianto" required><small class="muted">Puoi inserirne una nuova anche se non è presente tra quelle già utilizzate.</small></div>
             <div class="field"><label for="voice-account">Sottoconto</label><input id="voice-account" list="voice-accounts" placeholder="Seleziona o scrivi un codice" required><datalist id="voice-accounts"></datalist></div>
             <div class="field"><label for="voice-total">Importo totale (€)</label><input id="voice-total" type="number" min="0.01" step="0.01" required></div>
             <div class="field"><label for="voice-frequency">Ripartizione iniziale</label><select id="voice-frequency"><option value="1">Mensile</option><option value="3">Trimestrale</option><option value="0">Tutto in un mese</option></select></div>
@@ -189,11 +191,22 @@
             <div class="field"><label for="component-source">Fonte finanziamento</label><input id="component-source" placeholder="es. Mezzi propri" required></div>
             <div class="field"><label for="component-life">Vita utile (anni)</label><input id="component-life" type="number" min="1" step="1" required></div>
             <div class="field"><label for="component-state">Stato</label><select id="component-state"><option>Pianificato</option><option>In approvazione</option><option>Approvato</option></select></div>
+            <div class="field"><label for="component-purchase-date">Data investimento</label><input id="component-purchase-date" type="date" required></div>
+            <div class="field"><label for="component-service-date">Pronto all'uso dal</label><input id="component-service-date" type="date"></div>
             <div class="field"><label for="component-amount">Importo iniziale (€)</label><input id="component-amount" type="number" min="0.01" step="0.01" required></div>
             <div class="field"><label for="component-adjustment">Rettifiche approvate (€)</label><input id="component-adjustment" type="number" readonly value="0"></div>
             <div class="field"><label for="component-updated">CAPEX aggiornato (€)</label><input id="component-updated" type="number" readonly value="0"></div>
             <div class="field"><label for="component-depreciation">Ammortamento anno (€)</label><input id="component-depreciation" type="number" min="0" step="0.01" value="0" required></div>
-            <p class="muted full">Piano dei pagamenti: distribuisci l'importo sui dodici mesi. La somma deve coincidere con il CAPEX aggiornato (importo iniziale più rettifiche approvate). La quota di ammortamento è una stima da verificare.</p>
+            <div class="field"><label for="component-payment-mode">Come viene pagato?</label><select id="component-payment-mode"><option value="manuale">Piano manuale · 12 mesi</option><option value="fornitore">Rate al fornitore</option><option value="finanziamento">Finanziamento bancario</option></select></div>
+            <div class="full plan-settings" id="component-plan-settings" hidden>
+              <div class="field"><label for="component-first-due">Prima rata</label><input id="component-first-due" type="date"></div>
+              <div class="field"><label for="component-installments">Numero rate</label><input id="component-installments" type="number" min="1" max="600" step="1" value="120"></div>
+              <div class="field"><label for="component-interval">Periodicità</label><select id="component-interval"><option value="1">Mensile</option><option value="3">Trimestrale</option><option value="12">Annuale</option></select></div>
+              <div class="field" id="component-interest-field"><label for="component-interest">Tasso annuo (%)</label><input id="component-interest" type="number" min="0" max="100" step="0.01" value="0"></div>
+              <button class="btn blue" type="button" id="component-generate">Genera piano rate</button>
+            </div>
+            <p class="muted full" id="component-plan-help">Inserisci gli importi nei dodici mesi. La loro somma deve coincidere con il CAPEX aggiornato.</p>
+            <div class="field full"><label for="component-plan-year">Mesi visualizzati nell'anno</label><select id="component-plan-year"></select></div>
             <div class="full payment-grid" id="component-payment-fields"></div>
             <div class="preview full" id="component-payment-summary" role="status"></div>
           </div>

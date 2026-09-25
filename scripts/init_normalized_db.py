@@ -26,6 +26,25 @@ def normalize_code(value: object) -> str:
     return "".join(character.lower() for character in str(value or "") if character.isalnum())
 
 
+def depreciation_cents(component: dict, year: int) -> int:
+    service_date = component.get("inServiceDate")
+    if not service_date:
+        return cents(component.get("depreciation")) if year == component["budgetYear"] else 0
+    start = date.fromisoformat(service_date)
+    months = int(component["life"]) * 12
+    amount = cents(component.get("approved")) + cents(component.get("adjustment"))
+
+    def rounded_share(months_elapsed: int) -> int:
+        return (2 * months_elapsed * amount + months) // (2 * months)
+
+    total = 0
+    for month in range(1, 13):
+        offset = (year - start.year) * 12 + month - start.month
+        if 0 <= offset < months:
+            total += rounded_share(offset + 1) - rounded_share(offset)
+    return total
+
+
 def read_mockup_state(source: Path) -> dict:
     if not source.is_file():
         raise FileNotFoundError(f"Database sorgente non trovato: {source}")
@@ -177,26 +196,51 @@ def insert_capex(connection: sqlite3.Connection, state: dict, level_by_code: dic
         if project is None:
             continue
         project_id, fiscal_year = project
+        component_for_depreciation = {**component, "budgetYear": fiscal_year}
+        mode = component.get("paymentMode") or "manuale"
         cursor = connection.execute(
             """
             INSERT INTO capex_component(
                 source_key, capex_project_id, budget_item_id, description, category, funding_source,
-                useful_life_years, state, approved_amount_cents, depreciation_year_cents
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                useful_life_years, purchase_date, in_service_date, payment_mode,
+                first_due_date, installment_count, interval_months, annual_interest_rate,
+                state, approved_amount_cents, depreciation_year_cents
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 component["id"], project_id,
                 item_by_source.get(component.get("budgetRowId") or LEGACY_CAPEX_ROWS.get(component["id"])),
                 component["component"], component.get("category", "Da definire"),
                 component.get("source", "Da definire"), int(component.get("life", 1)),
+                component.get("purchaseDate"), component.get("inServiceDate"), mode,
+                component.get("firstDueDate"), component.get("installments"),
+                component.get("intervalMonths"), float(component.get("annualRate") or 0),
                 component.get("state", "Pianificato"), cents(component.get("approved")),
-                cents(component.get("depreciation")),
+                depreciation_cents(component_for_depreciation, fiscal_year),
             ),
         )
         component_id = cursor.lastrowid
         component_by_source[component["id"]] = component_id
 
-        if len(payments) == 4:
+        schedule = component.get("paymentSchedule") or []
+        if schedule:
+            principal_total = sum(cents(payment["principal"]) for payment in schedule)
+            expected_total = cents(component.get("approved")) + cents(component.get("adjustment"))
+            if principal_total != expected_total:
+                raise ValueError(f"Capitale rate non coerente per {component['id']}")
+            for payment in schedule:
+                principal = cents(payment["principal"])
+                interest = cents(payment.get("interest"))
+                connection.execute(
+                    """
+                    INSERT INTO capex_payment(
+                        capex_component_id, due_date, amount_cents, principal_cents, interest_cents
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (component_id, date.fromisoformat(payment["date"]).isoformat(),
+                     principal + interest, principal, interest),
+                )
+        elif len(payments) == 4:
             monthly_payments = [0] * 12
             for month, amount in zip(LEGACY_PAYMENT_MONTHS, payments):
                 monthly_payments[month - 1] = amount
@@ -205,13 +249,30 @@ def insert_capex(connection: sqlite3.Connection, state: dict, level_by_code: dic
         else:
             raise ValueError(f"Piano pagamenti non valido per {component['id']}: attesi 12 mesi")
 
-        for month, amount in enumerate(monthly_payments, start=1):
+        if not schedule:
+            for month, amount in enumerate(monthly_payments, start=1):
+                connection.execute(
+                    """
+                    INSERT INTO capex_payment(
+                        capex_component_id, due_date, amount_cents, principal_cents, interest_cents
+                    ) VALUES (?, ?, ?, ?, 0)
+                    """,
+                    (component_id, date(fiscal_year, month, 1).isoformat(), cents(amount), cents(amount)),
+                )
+
+        if component.get("inServiceDate"):
+            first_year = date.fromisoformat(component["inServiceDate"]).year
+            for year in range(first_year, first_year + int(component["life"]) + 1):
+                value = depreciation_cents(component_for_depreciation, year)
+                if value:
+                    connection.execute(
+                        "INSERT INTO capex_depreciation(capex_component_id, fiscal_year, amount_cents) VALUES (?, ?, ?)",
+                        (component_id, year, value),
+                    )
+        else:
             connection.execute(
-                """
-                INSERT INTO capex_payment(capex_component_id, due_date, amount_cents)
-                VALUES (?, ?, ?)
-                """,
-                (component_id, date(fiscal_year, month, 1).isoformat(), cents(amount)),
+                "INSERT INTO capex_depreciation(capex_component_id, fiscal_year, amount_cents) VALUES (?, ?, ?)",
+                (component_id, fiscal_year, cents(component.get("depreciation"))),
             )
 
     return component_by_source
@@ -317,7 +378,7 @@ def build_database(source: Path, target: Path, replace: bool) -> None:
 
 
 def database_counts(target: Path) -> dict[str, int]:
-    tables = ("budget", "budget_level", "account", "budget_item", "budget_period_value", "adjustment", "approval_event", "capex_project", "capex_component", "capex_payment")
+    tables = ("budget", "budget_level", "account", "budget_item", "budget_period_value", "adjustment", "approval_event", "capex_project", "capex_component", "capex_payment", "capex_depreciation")
     with closing(sqlite3.connect(target)) as connection:
         return {table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in tables}
 

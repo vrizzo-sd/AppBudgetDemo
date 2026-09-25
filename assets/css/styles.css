@@ -57,6 +57,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .btn.primary { border-color: var(--wg-orange); background: var(--wg-orange); color: white; }
 .btn.primary:hover { background: var(--wg-orange-dark); color: white; }
 .btn.blue { border-color: var(--wg-blue-dark); background: var(--wg-blue); color: white; }
+.btn.green { border-color: var(--wg-green); background: var(--wg-green); color: white; }
+.btn.green:hover { border-color: #42662d; background: #42662d; color: white; }
 .btn.ghost { border-color: transparent; background: transparent; }
 .btn.small { min-height: 28px; padding: 4px 8px; font-size: 12px; }
 .btn.icon { min-width: 30px; padding: 4px 7px; }
@@ -111,6 +113,7 @@ tbody tr:hover:not(.budget-row):not(.total-row) td { background: #f8fafb; }
 
 .investment-note { padding: 9px 11px; margin-top: 10px; background: var(--wg-orange-soft); border-left: 4px solid var(--wg-orange); }
 .capex-controls { display: flex; align-items: end; gap: 9px; flex-wrap: wrap; padding: 10px; background: var(--wg-white); border: 1px solid var(--wg-line); margin-bottom: 10px; }
+.capex-controls select { min-height: 34px; border: 1px solid var(--wg-line); background: var(--wg-input); padding: 5px 8px; }
 .capex-controls .spacer { flex: 1; }
 .investment-details { margin-top: 14px; }
 .investment-details .panel-title { font-size: 16px; }
@@ -156,6 +159,11 @@ tbody tr:hover:not(.budget-row):not(.total-row) td { background: #f8fafb; }
 .payment-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .payment-grid .field { min-width: 0; }
 .payment-grid input { width: 100%; }
+.payment-grid input[readonly] { background: #e5f0e2; }
+.plan-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; border: 1px solid var(--wg-line); background: #f7faf5; }
+.plan-settings[hidden] { display: none; }
+.plan-settings [hidden] { display: none; }
+.plan-settings .btn { align-self: end; }
 .preview.invalid { background: var(--wg-red-soft); border-left-color: var(--wg-red); }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--wg-line); }
 
@@ -180,6 +188,7 @@ tbody tr:hover:not(.budget-row):not(.total-row) td { background: #f8fafb; }
 }
 @media (max-width: 650px) {
   .payment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-settings { grid-template-columns: 1fr; }
   .content { padding: 10px 8px 24px; }
   .titlebar { padding: 10px 8px; }
   .titlebar h1 { width: 100%; font-size: 22px; }

@@ -1,4 +1,6 @@
-# Mockup Budget Analitico Wingest
+# AppBudgetDemo — Mockup Budget Analitico Wingest
+
+Questa è la **cartella unica e corrente** del progetto. Apri `AppBudgetDemo` in VS Code, non la cartella che la contiene. Il repository Git conserva lo storico delle versioni; i database locali e lo ZIP di consegna sono generati e non devono essere caricati su GitHub.
 
 Piccolo ambiente modulare e modificabile in Visual Studio Code, composto da:
 
@@ -8,18 +10,21 @@ Piccolo ambiente modulare e modificabile in Visual Studio Code, composto da:
 - `assets/js/components/`: componenti che costruiscono le singole tabelle;
 - `assets/js/data/demo-data.js`: dataset dimostrativo separato dalla logica;
 - `assets/js/core/formatters.js`: formattatori e funzioni condivise;
+- `assets/js/core/capex-plan.js`: generazione rate, pagamenti annuali e ammortamento demo;
 - `server.py`: mini server locale scritto con la sola libreria standard Python;
 - `schema.sql`: struttura del piccolo database SQLite;
 - `schema_normalizzato.sql`: schema relazionale pensato per l'applicazione;
 - `scripts/init_normalized_db.py`: migrazione rigenerabile dal mockup al database relazionale;
 - `query_esempio.sql`: query pronte per gestione, analisi, rettifiche e CAPEX;
-- `ARCHITETTURA_DATABASE.md`: proposta di database normalizzato per l'evoluzione reale;
+- `docs/ARCHITETTURA_DATABASE.md`: proposta di database normalizzato per l'evoluzione reale;
 - `data/budget_mockup.db`: database creato automaticamente al primo avvio;
 - `.vscode/tasks.json`: comando pronto per avviare il progetto da VS Code.
 
-Il precedente `Mockup_Budget_Analitico_Wingest.html` rimane come copia monolitica di riferimento, ma il server utilizza ora `index.html`.
+La versione monolitica precedente non fa parte del progetto corrente: il server usa `index.html`.
 
 Non servono `npm`, pacchetti Python o connessioni esterne.
+
+Per controllare i calcoli CAPEX, se Node.js è disponibile: `node --test tests/capex-plan.test.mjs`. Node.js è facoltativo per l'uso del mockup.
 
 ## Avvio rapido
 
@@ -34,7 +39,7 @@ In alternativa, su Windows fare doppio clic su `start.bat`.
 
 ## Pacchetto da consegnare allo sviluppatore
 
-Il file pronto da copiare o condividere è `dist/Mockup_Budget_Analitico_Wingest_sviluppatore.zip`. Estrarlo, aprire la cartella estratta in VS Code e avviare `start.bat` oppure `python server.py`. Aprire la pagina una volta per generare i dati demo. In SQLTools creare poi una connessione SQLite al file `data/budget_wingest.db` della cartella estratta e provare `query_esempio.sql`. Lo schema completo è `schema_normalizzato.sql`, il modello concettuale e le regole sono in `SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md` e `ARCHITETTURA_DATABASE.md`.
+Il file pronto da copiare o condividere è `dist/Mockup_Budget_Analitico_Wingest_sviluppatore.zip`. Estrarlo, aprire la cartella estratta in VS Code e avviare `start.bat` oppure `python server.py`. Aprire la pagina una volta per generare i dati demo. In SQLTools creare poi una connessione SQLite al file `data/budget_wingest.db` della cartella estratta e provare `query_esempio.sql`. Lo schema completo è `schema_normalizzato.sql`, il modello concettuale e le regole sono in `docs/SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md` e `docs/ARCHITETTURA_DATABASE.md`.
 
 Lo ZIP esclude i database locali di lavoro. Per rigenerarlo dopo modifiche al mockup: `python scripts/create_developer_package.py`.
 
@@ -53,11 +58,13 @@ Lo ZIP esclude i database locali di lavoro. Per rigenerarlo dopo modifiche al mo
 
 I componenti sono funzioni JavaScript pure: ricevono dati e restituiscono HTML. `app.js` conserva le regole applicative e collega pulsanti, filtri, popup e persistenza.
 
-La commessa di investimento usa le stesse prime tre tabelle del budget ordinario: le tabelle 1 e 2 restano riepiloghi compatti, con ricavi e costi separati; la tabella 3 espone la pianificazione mensile del budget. Nella tabella 1 non compare la durata; per i soli investimenti compare la **Fonte di finanziamento**, modificabile direttamente nella cella e salvata in SQLite. Solo per i budget di investimento compare anche la tabella 4, con tutte le colonne da gennaio a dicembre, la **Voce** CAPEX, fonte, vita utile, stato, CAPEX iniziale, rettifiche, CAPEX aggiornato e ammortamento. La categoria non è esposta nella tabella 4. Cliccando un importo mensile o **Modifica voce** si apre il modulo con dodici mesi. La somma dei pagamenti deve coincidere con il CAPEX aggiornato. Tabella 3 (distribuzione del budget) e tabella 4 (pagamenti) possono avere mesi diversi, ma lo stesso totale annuo per la voce collegata. Il dettaglio CAPEX non va sommato una seconda volta ai costi.
+Nella schermata **Gestione Budget**, sulla riga verde di ogni budget è disponibile **＋ Aggiungere voci**. Apre un modulo vuoto per il codice e la descrizione del nuovo livello/commessa; la nuova riga bianca viene inserita sotto il budget dopo il salvataggio. I campi obbligatori e l'univocità del codice impediscono di salvare righe incomplete o duplicate.
 
-Nella Redazione Budget Analitica, **Tipo budget** permette di passare tra budget ordinari e di investimento; **Nome BDG** sceglie il budget del tipo selezionato. **＋ Nuova voce**, nell'intestazione della tabella 3 per entrambi i tipi, apre un modulo per scegliere livello, costo/ricavo, voce, sottoconto, importo e ripartizione iniziale. Dopo l'aggiunta, la tabella 3 mostra i valori mensili e le tabelle 2 e 1 ricalcolano subito i totali; dopo il salvataggio, i due riepiloghi vengono riletti dalle viste SQL del database relazionale. La successiva modifica delle rate si fa con **Ripartisci**. Per un investimento da capitalizzare con vita utile e piano pagamenti si usa **＋ Nuova voce CAPEX** nella tabella 4.
+La commessa di investimento usa le stesse prime tre tabelle del budget ordinario: le tabelle 1 e 2 restano riepiloghi compatti, con ricavi e costi separati; la tabella 3 espone la pianificazione mensile del budget. Nella tabella 1 non compare la durata; per i soli investimenti compare la **Fonte di finanziamento**, modificabile direttamente nella cella e salvata in SQLite. Solo per i budget di investimento compare la tabella 4: il selettore **Anno** mostra gennaio–dicembre dell'anno scelto, la **Voce** CAPEX, fonte, vita utile, stato, pagamenti dell'anno, capitale residuo, CAPEX iniziale, rettifiche, CAPEX aggiornato e ammortamento dell'anno. La categoria non è esposta. Nel modulo della voce si sceglie un piano manuale di dodici mesi, rate al fornitore o finanziamento; negli ultimi due casi **Genera piano rate** può produrre scadenze su più anni. La somma del **capitale** di tutte le rate deve coincidere con il CAPEX aggiornato; gli interessi del finanziamento sono separati e aumentano le uscite, non il CAPEX. Il budget della tabella 3 è registrato nell'anno di investimento e non è la somma delle uscite dell'anno selezionato in tabella 4. La vita utile e la data di entrata in funzione determinano una stima di ammortamento distinta dal piano di pagamento. Il dettaglio CAPEX non va sommato una seconda volta ai costi.
 
-La specifica per lo sviluppatore Wingest è in `SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md`. Il pacchetto distribuibile, privo dei database di lavoro, si genera con `scripts/create_developer_package.py`.
+Nella Redazione Budget Analitica, **Tipo budget** permette di passare tra budget ordinari e di investimento; **Nome BDG** sceglie il budget del tipo selezionato. **＋ Nuova voce**, nell'intestazione della tabella 3 per entrambi i tipi, apre un modulo per scegliere livello, costo/ricavo, sottoconto, importo e ripartizione iniziale. Il campo **Voce personalizzata** è testo libero: consente di descrivere anche una voce non ancora utilizzata. Dopo l'aggiunta, la nuova riga compare nella tabella 3 e le tabelle 2 e 1 ricalcolano subito i totali; dopo il salvataggio, i riepiloghi vengono riletti dalle viste SQL del database relazionale. La successiva modifica delle rate si fa con **Ripartisci**. Per un investimento da capitalizzare con vita utile e piano pagamenti si usa **＋ Nuova voce CAPEX** nella tabella 4.
+
+La specifica per lo sviluppatore Wingest è in `docs/SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md`. Il pacchetto distribuibile, privo dei database di lavoro, si genera con `scripts/create_developer_package.py`.
 
 ## SQLite
 
@@ -70,12 +77,12 @@ Nel mockup, `budget_mockup.db` (stato JSON) resta la sorgente delle modifiche; `
 Per crearlo o riallinearlo manualmente si può usare:
 
 ```powershell
-& "C:\Users\Valentina.Rizzo\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe" scripts\init_normalized_db.py --replace
+py -3 scripts\init_normalized_db.py --replace
 ```
 
 Aprire `query_esempio.sql` per eseguire interrogazioni già pronte. Gli importi sono memorizzati in centesimi interi per evitare errori di arrotondamento e nelle query vengono divisi per `100.0` per mostrarli in euro.
 
-Per la futura applicazione reale, leggere `ARCHITETTURA_DATABASE.md`, che descrive tabelle, relazioni, vincoli e percorso di migrazione.
+Per la futura applicazione reale, leggere `docs/ARCHITETTURA_DATABASE.md`, che descrive tabelle, relazioni, vincoli e percorso di migrazione.
 
 ## Ripristino dati demo
 

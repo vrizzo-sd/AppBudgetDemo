@@ -9,9 +9,9 @@ OUTPUT = ROOT / "dist" / "Mockup_Budget_Analitico_Wingest_sviluppatore.zip"
 FILES = (
     ".gitignore",
     ".vscode/tasks.json",
-    "ARCHITETTURA_DATABASE.md",
     "README.md",
-    "SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md",
+    "docs/ARCHITETTURA_DATABASE.md",
+    "docs/SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md",
     "index.html",
     "query_esempio.sql",
     "schema.sql",
@@ -21,6 +21,7 @@ FILES = (
     "scripts/__init__.py",
     "scripts/create_developer_package.py",
     "scripts/init_normalized_db.py",
+    "tests/capex-plan.test.mjs",
 )
 
 

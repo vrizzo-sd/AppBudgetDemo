@@ -80,6 +80,13 @@ CREATE TABLE capex_component (
     category TEXT NOT NULL,
     funding_source TEXT NOT NULL,
     useful_life_years INTEGER NOT NULL CHECK (useful_life_years > 0),
+    purchase_date TEXT,
+    in_service_date TEXT,
+    payment_mode TEXT NOT NULL DEFAULT 'manuale' CHECK (payment_mode IN ('manuale', 'fornitore', 'finanziamento')),
+    first_due_date TEXT,
+    installment_count INTEGER,
+    interval_months INTEGER,
+    annual_interest_rate REAL NOT NULL DEFAULT 0,
     state TEXT NOT NULL,
     approved_amount_cents INTEGER NOT NULL DEFAULT 0 CHECK (approved_amount_cents >= 0),
     depreciation_year_cents INTEGER NOT NULL DEFAULT 0 CHECK (depreciation_year_cents >= 0)
@@ -90,8 +97,19 @@ CREATE TABLE capex_payment (
     capex_component_id INTEGER NOT NULL REFERENCES capex_component(id) ON DELETE CASCADE,
     due_date TEXT NOT NULL CHECK (due_date GLOB '????-??-??'),
     amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+    principal_cents INTEGER NOT NULL CHECK (principal_cents >= 0),
+    interest_cents INTEGER NOT NULL DEFAULT 0 CHECK (interest_cents >= 0),
     payment_state TEXT NOT NULL DEFAULT 'Pianificato',
+    CHECK (amount_cents = principal_cents + interest_cents),
     UNIQUE (capex_component_id, due_date)
+);
+
+CREATE TABLE capex_depreciation (
+    id INTEGER PRIMARY KEY,
+    capex_component_id INTEGER NOT NULL REFERENCES capex_component(id) ON DELETE CASCADE,
+    fiscal_year INTEGER NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+    UNIQUE (capex_component_id, fiscal_year)
 );
 
 CREATE TABLE adjustment (
@@ -126,6 +144,7 @@ CREATE INDEX idx_adjustment_item ON adjustment(budget_item_id);
 CREATE INDEX idx_adjustment_capex ON adjustment(capex_component_id);
 CREATE INDEX idx_capex_component_project ON capex_component(capex_project_id);
 CREATE INDEX idx_capex_payment_due_date ON capex_payment(due_date);
+CREATE INDEX idx_capex_depreciation_year ON capex_depreciation(fiscal_year);
 
 CREATE VIEW v_budget_item_totals AS
 SELECT
@@ -197,6 +216,8 @@ SELECT
         WHERE ad.capex_component_id = cc.id
           AND ad.state = 'Approvata'
     ), 0) AS updated_capex_cents,
+    COALESCE((SELECT SUM(pay.principal_cents) FROM capex_payment pay WHERE pay.capex_component_id = cc.id), 0) AS scheduled_principal_cents,
+    COALESCE((SELECT SUM(pay.interest_cents) FROM capex_payment pay WHERE pay.capex_component_id = cc.id), 0) AS scheduled_interest_cents,
     COALESCE((SELECT SUM(pay.amount_cents) FROM capex_payment pay WHERE pay.capex_component_id = cc.id), 0) AS scheduled_payment_cents,
     cc.depreciation_year_cents
 FROM capex_component cc
@@ -208,13 +229,15 @@ SELECT
     SUM(approved_amount_cents) AS approved_capex_cents,
     SUM(approved_adjustment_cents) AS approved_adjustment_cents,
     SUM(updated_capex_cents) AS updated_capex_cents,
+    SUM(scheduled_principal_cents) AS scheduled_principal_cents,
+    SUM(scheduled_interest_cents) AS scheduled_interest_cents,
     SUM(scheduled_payment_cents) AS scheduled_payment_cents,
     SUM(depreciation_year_cents) AS depreciation_year_cents
 FROM v_capex_component_summary
 GROUP BY project_code;
 
 INSERT INTO app_metadata(key, value) VALUES
-    ('schema_version', '1'),
+    ('schema_version', '2'),
     ('data_classification', 'Dati demo non contabili'),
     ('amount_storage', 'centesimi interi'),
     ('source', 'budget_mockup.db/mockup_state');
