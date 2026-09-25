@@ -28,14 +28,14 @@ La prima pagina presenta una **intestazione** (riga verde) per budget e le righe
 
 ### 2.2 Redazione: regole comuni
 
-Il selettore **Tipo budget** cambia tra ordinario e investimento; **Nome BDG** seleziona il budget del tipo corrente. Le tabelle 1 e 2 sono riepiloghi calcolati, non luoghi dove digitare importi. La tabella 3 contiene la pianificazione mensile su dodici colonne, con schede separate **Costi** e **Ricavi** e un unico totale della scheda corrente. Il pulsante **＋ Nuova voce** è nell'intestazione della tabella 3 in entrambi i tipi di budget.
+Il selettore **Tipo budget** cambia tra ordinario e investimento; **Nome BDG** seleziona il budget del tipo corrente. Le tabelle 1 e 2 sono riepiloghi calcolati, non luoghi dove digitare importi. Per il budget `Ordinario` è visibile la tabella 3, con pianificazione mensile su dodici colonne, schede separate **Costi** e **Ricavi** e un unico totale della scheda corrente. Per il budget `Investimento` la tabella 3 è nascosta e compare al suo posto la tabella 4. Le due tabelle non devono essere visibili contemporaneamente.
 
 | Tabella | Contenuto e comportamento |
 | --- | --- |
 | 1. Livelli del budget | Codice, descrizione, totale ricavi, totale costi. **Non** mostra la durata. Solo per investimento aggiunge **Fonte di finanziamento**, campo editabile a livello/commessa. |
 | 2. Voci e sottoconti collegati | Codice livello, descrizione livello, voce, sottoconto, durata, totale ricavi, totale costi. I totali derivano dalle voci della tabella 3. |
-| 3. Pianificazione mensile | Una riga per voce/sottoconto/natura, colonne gennaio–dicembre, totale annuale e azioni. Le schede Costi/Ricavi non vanno fuse in due colonne di totale sulla stessa riga. |
-| 4. Pagamenti CAPEX | Visibile **solo** per `Investimento`. Non deve comparire per `Ordinario`. |
+| 3. Pianificazione mensile | Visibile **solo** per `Ordinario`. Una riga per voce/sottoconto/natura, colonne gennaio–dicembre, totale annuale e azioni. Le schede Costi/Ricavi non vanno fuse in due colonne di totale sulla stessa riga. |
+| 4. Pagamenti CAPEX | Visibile **solo** per `Investimento`. Non deve comparire per `Ordinario` e sostituisce a video la tabella 3. |
 
 **Nuova voce personalizzata nella tabella 3.** L'utente seleziona livello, natura costo/ricavo, inserisce una descrizione libera (non limitata a un catalogo precompilato), indica sottoconto, importo e ripartizione iniziale. Il salvataggio crea la voce e i valori periodici; la nuova riga appare nella tabella 3 e i totali delle tabelle 2 e 1 si aggiornano senza inserimenti duplicati. Il sottoconto deve riferirsi a un conto valido nel piano dei conti Wingest; il campo libero riguarda la descrizione della voce, non la creazione automatica di un conto contabile. Il sottoconto non deve essere riutilizzato contemporaneamente con natura opposta senza una regola esplicita di riconciliazione. Va impedito il duplicato della stessa combinazione livello, sottoconto, voce e natura. Le modalità iniziali demo sono mensile, trimestrale o tutto in un mese.
 
@@ -134,7 +134,7 @@ Non collegare questo server alla rete aziendale o a un ambiente produttivo: asco
 
 ## 7. Criteri di accettazione minimi
 
-1. Con budget **ordinario** sono visibili tabelle 1, 2 e 3; **non** la tabella 4. Con budget **investimento** si aggiunge la tabella 4 con Gen–Dic, colonna “Voce” e senza “Categoria”.
+1. Con budget **ordinario** sono visibili tabelle 1, 2 e 3; **non** la tabella 4. Con budget **investimento** sono visibili tabelle 1, 2 e 4; **non** la tabella 3. La tabella 4 presenta Gen–Dic, colonna “Voce” e nessuna colonna “Categoria”.
 2. L'apertura dell'intestazione GRANA include GRA-001, GRA-002 e GRA-003; l'apertura di GRA-001 esclude gli altri livelli.
 3. Aggiungendo nella tabella 3 un costo demo di 1.200 € a GRA-001, la tabella 3 mostra la riga e i totali della voce e del livello nelle tabelle 2 e 1 aumentano esattamente di 1.200 €. La stessa voce e i dodici valori sono interrogabili nel database.
 4. La tabella 1 non ha “Durata”. Per investimento la fonte del livello è editabile e persiste al ricaricamento, senza modificare automaticamente le fonti delle singole voci CAPEX.

@@ -337,7 +337,9 @@ import {
         ? "Annuale"
         : currentBudget.frequency;
     $("#analysis-duration").value = "12 mesi (anno)";
-    $("#capex-panel").hidden = currentBudget.type !== "Investimento";
+    const investment = currentBudget.type === "Investimento";
+    $("#monthly-panel").hidden = investment;
+    $("#capex-panel").hidden = !investment;
     renderAnalysis();
     showPage("analysis");
     refreshSqlSummaries();
