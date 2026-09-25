@@ -17,6 +17,7 @@ Piccolo ambiente modulare e modificabile in Visual Studio Code, composto da:
 - `scripts/init_normalized_db.py`: migrazione rigenerabile dal mockup al database relazionale;
 - `query_esempio.sql`: query pronte per gestione, analisi, rettifiche e CAPEX;
 - `docs/ARCHITETTURA_DATABASE.md`: proposta di database normalizzato per l'evoluzione reale;
+- `docs/00_INDICE_DOCUMENTAZIONE.md`: indice dell'analisi, delle decisioni e dei ticket di sviluppo;
 - `data/budget_mockup.db`: database creato automaticamente al primo avvio;
 - `.vscode/tasks.json`: comando pronto per avviare il progetto da VS Code.
 
@@ -64,7 +65,7 @@ Le tabelle 1 e 2 restano riepiloghi compatti per entrambi i tipi di budget, con 
 
 Nella Redazione Budget Analitica, **Tipo budget** permette di passare tra budget ordinari e di investimento; **Nome BDG** sceglie il budget del tipo selezionato. Nell'ordinario, **＋ Nuova voce** nella tabella 3 apre un modulo per scegliere livello, costo/ricavo, sottoconto, importo e ripartizione iniziale. Il campo **Voce personalizzata** è testo libero: consente di descrivere anche una voce non ancora utilizzata. Dopo l'aggiunta, la nuova riga compare nella tabella 3 e le tabelle 2 e 1 ricalcolano subito i totali; dopo il salvataggio, i riepiloghi vengono riletti dalle viste SQL del database relazionale. La successiva modifica delle rate si fa con **Ripartisci**. Nell'investimento, la tabella 3 è nascosta e si usa **＋ Nuova voce CAPEX** nella tabella 4.
 
-La specifica per lo sviluppatore Wingest è in `docs/SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md`. Il pacchetto distribuibile, privo dei database di lavoro, si genera con `scripts/create_developer_package.py`.
+La documentazione per lo sviluppo parte da `docs/00_INDICE_DOCUMENTAZIONE.md`. La specifica di dettaglio resta in `docs/SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md`; l'analisi dei gap, le decisioni da validare, il piano e i ticket sono raccolti negli altri documenti della stessa cartella. Il pacchetto distribuibile, privo dei database di lavoro, si genera con `scripts/create_developer_package.py`.
 
 ## SQLite
 
