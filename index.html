@@ -40,6 +40,10 @@
           <h2>Budget e livelli analitici</h2>
           <span class="muted">La riga verde modifica l’intestazione o aggiunge una voce; le righe sottostanti modificano o aprono il singolo livello.</span>
         </div>
+        <div class="table-filter-bar">
+          <label for="budget-search">Cerca nella tabella</label>
+          <input class="table-search" id="budget-search" type="search" placeholder="Nome, codice, stato o tipologia…" autocomplete="off">
+        </div>
         <div class="table-wrap">
           <table aria-label="Gestione budget analitici">
             <thead>
@@ -77,11 +81,19 @@
           <div class="analysis-grid">
             <section class="panel">
               <div class="panel-title">1. Livelli del budget</div>
+              <div class="table-filter-bar compact">
+                <label for="level-search">Cerca</label>
+                <input class="table-search" id="level-search" type="search" placeholder="Codice, descrizione o fonte…" autocomplete="off">
+              </div>
               <div class="table-wrap"><table aria-label="Livelli del budget"><thead><tr id="level-head"></tr></thead><tbody id="level-table"></tbody></table></div>
             </section>
 
             <section class="panel">
               <div class="panel-title">2. Voci e sottoconti collegati</div>
+              <div class="table-filter-bar compact">
+                <label for="voice-search">Cerca</label>
+                <input class="table-search" id="voice-search" type="search" placeholder="Codice, voce o sottoconto…" autocomplete="off">
+              </div>
               <div class="table-wrap"><table aria-label="Voci e sottoconti"><thead><tr id="voice-head"><th>Codice</th><th>Livello</th><th>Voce</th><th>Sottoconto</th><th>Durata</th><th class="num">Tot. ricavi</th><th class="num">Tot. costi</th></tr></thead><tbody id="voice-table"></tbody></table></div>
             </section>
 
@@ -94,6 +106,10 @@
                 </div>
                 <button class="btn" type="button" id="new-voice">＋ Nuova voce</button>
                 <span class="total-chip" id="grand-total">TOTALE COSTI: 0 €</span>
+              </div>
+              <div class="table-filter-bar compact">
+                <label for="monthly-search">Cerca</label>
+                <input class="table-search" id="monthly-search" type="search" placeholder="Codice, descrizione, voce o sottoconto…" autocomplete="off">
               </div>
               <div class="table-wrap">
                 <table aria-label="Pianificazione mensile costi e ricavi">
@@ -117,6 +133,10 @@
             <button class="btn" type="button" id="capex-adjustment">Rettifiche CAPEX</button>
             <button class="btn" type="button" id="new-component">＋ Nuova voce CAPEX</button>
             <button class="btn primary" type="button" id="submit-capex">Invia ad approvazione</button>
+          </div>
+          <div class="table-filter-bar compact">
+            <label for="capex-search">Cerca</label>
+            <input class="table-search" id="capex-search" type="search" placeholder="Commessa, voce, fonte o stato…" autocomplete="off">
           </div>
           <div class="table-wrap">
             <table class="capex-grid" aria-label="Analisi CAPEX della commessa">

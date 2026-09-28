@@ -240,6 +240,37 @@ textarea:focus-visible {
   color: var(--wg-muted);
 }
 
+.table-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--wg-line);
+  border-bottom: 0;
+  background: var(--wg-white);
+}
+.table-filter-bar.compact {
+  padding: 7px 10px;
+  background: #f7f9fa;
+}
+.table-filter-bar label {
+  color: var(--wg-muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.table-search {
+  width: min(420px, 100%);
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--wg-line-strong);
+  background: var(--wg-input);
+}
+.table-search:focus {
+  outline: 2px solid color-mix(in srgb, var(--wg-blue) 28%, transparent);
+  border-color: var(--wg-blue);
+}
+
 .table-wrap {
   overflow-x: auto;
   background: var(--wg-white);

@@ -262,7 +262,32 @@ import {
   function renderBudgets() {
     const structure = $("#filter-structure").value;
     const status = $("#filter-status").value;
-    $("#budget-list").innerHTML = budgetRowsHtml(budgets, structure, status);
+    const search = $("#budget-search").value;
+    $("#budget-list").innerHTML = budgetRowsHtml(
+      budgets,
+      structure,
+      status,
+      search,
+    );
+  }
+
+  function normalizeSearch(value) {
+    return String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  }
+
+  function matchesSearch(values, search) {
+    const term = normalizeSearch(search.trim());
+    return (
+      !term ||
+      values.some((value) => normalizeSearch(value).includes(term))
+    );
+  }
+
+  function emptyTableRow(columns, label = "Nessuna riga corrisponde alla ricerca.") {
+    return `<tr><td colspan="${columns}" class="center muted">${label}</td></tr>`;
   }
 
   function rowsForCurrent() {
@@ -307,6 +332,11 @@ import {
       currentBudget.children[0];
     analysisScope = childId ? "child" : "budget";
     currentNature = "cost";
+    ["level-search", "voice-search", "monthly-search", "capex-search"].forEach(
+      (id) => {
+        $(`#${id}`).value = "";
+      },
+    );
     $("#analysis-name").textContent =
       analysisScope === "budget" ? currentBudget.name : currentChild.name;
     $("#analysis-code").textContent =
@@ -347,18 +377,38 @@ import {
 
   function renderAnalysis() {
     const rows = rowsForCurrent();
-    const visibleLevels =
+    const levels =
       analysisScope === "budget" ? currentBudget.children : [currentChild];
     const investment = currentBudget.type === "Investimento";
+    const visibleLevels = levels.filter((level) =>
+      matchesSearch(
+        [level.code, level.name, level.fundingSource],
+        $("#level-search").value,
+      ),
+    );
+    const visibleRows = {
+      cost: rows.cost.filter((row) =>
+        matchesSearch(
+          [row.code, row.description, row.voice, row.account],
+          $("#voice-search").value,
+        ),
+      ),
+      revenue: rows.revenue.filter((row) =>
+        matchesSearch(
+          [row.code, row.description, row.voice, row.account],
+          $("#voice-search").value,
+        ),
+      ),
+    };
     $("#level-head").innerHTML =
       `<th>Codice</th><th>Descrizione</th>${investment ? "<th>Fonte di finanziamento</th>" : ""}<th class="num">Tot. ricavi</th><th class="num">Tot. costi</th>`;
-    $("#level-table").innerHTML = levelRowsHtml(
-      visibleLevels,
-      rows,
-      rowTotal,
-      investment,
-    );
-    $("#voice-table").innerHTML = voiceRowsHtml(rows, rowTotal);
+    $("#level-table").innerHTML = visibleLevels.length
+      ? levelRowsHtml(visibleLevels, rows, rowTotal, investment)
+      : emptyTableRow(investment ? 5 : 4);
+    $("#voice-table").innerHTML =
+      visibleRows.cost.length || visibleRows.revenue.length
+        ? voiceRowsHtml(visibleRows, rowTotal)
+        : emptyTableRow(7);
     renderMonthly();
     renderCapex();
     renderAdjustments();
@@ -383,33 +433,57 @@ import {
       const rows = rowsForCurrent();
       const levels =
         analysisScope === "budget" ? currentBudget.children : [currentChild];
-      $("#level-table").innerHTML = levelRowsHtml(
-        levels,
-        rows,
-        rowTotal,
-        currentBudget.type === "Investimento",
-        summary.levels,
+      const visibleLevels = levels.filter((level) =>
+        matchesSearch(
+          [level.code, level.name, level.fundingSource],
+          $("#level-search").value,
+        ),
       );
-      $("#voice-table").innerHTML = voiceRowsHtml(
-        rows,
-        rowTotal,
-        summary.items,
-      );
+      const visibleRows = {
+        cost: rows.cost.filter((row) =>
+          matchesSearch(
+            [row.code, row.description, row.voice, row.account],
+            $("#voice-search").value,
+          ),
+        ),
+        revenue: rows.revenue.filter((row) =>
+          matchesSearch(
+            [row.code, row.description, row.voice, row.account],
+            $("#voice-search").value,
+          ),
+        ),
+      };
+      $("#level-table").innerHTML = visibleLevels.length
+        ? levelRowsHtml(
+            visibleLevels,
+            rows,
+            rowTotal,
+            currentBudget.type === "Investimento",
+            summary.levels,
+          )
+        : emptyTableRow(currentBudget.type === "Investimento" ? 5 : 4);
+      $("#voice-table").innerHTML =
+        visibleRows.cost.length || visibleRows.revenue.length
+          ? voiceRowsHtml(visibleRows, rowTotal, summary.items)
+          : emptyTableRow(7);
     } catch {
       /* Il calcolo locale resta disponibile se il server SQL non risponde. */
     }
   }
 
   function renderMonthly() {
-    const rows = rowsForCurrent()[currentNature];
+    const rows = rowsForCurrent()[currentNature].filter((row) =>
+      matchesSearch(
+        [row.code, row.description, row.voice, row.account],
+        $("#monthly-search").value,
+      ),
+    );
     const title = currentNature === "cost" ? "COSTI" : "RICAVI";
     const grand = rows.reduce((sum, row) => sum + rowTotal(row), 0);
     $("#grand-total").textContent = `TOTALE ${title}: ${euro.format(grand)}`;
-    $("#monthly-table").innerHTML = monthlyRowsHtml(
-      rows,
-      rowTotal,
-      getApprovedAdjustment,
-    );
+    $("#monthly-table").innerHTML = rows.length
+      ? monthlyRowsHtml(rows, rowTotal, getApprovedAdjustment)
+      : emptyTableRow(18);
     $("#monthly-foot").innerHTML = monthlyTotalHtml(title, grand);
     $$("[data-nature-tab]").forEach((button) =>
       button.setAttribute(
@@ -440,9 +514,22 @@ import {
   }
 
   function renderCapex() {
-    const visibleComponents = capexForCurrent();
+    const allComponents = capexForCurrent();
+    const visibleComponents = allComponents.filter((component) =>
+      matchesSearch(
+        [
+          component.project,
+          component.component,
+          component.source,
+          component.paymentMode,
+          component.life,
+          component.state,
+        ],
+        $("#capex-search").value,
+      ),
+    );
     const years = [currentBudget.year];
-    visibleComponents.forEach((component) => {
+    allComponents.forEach((component) => {
       componentSchedule(component, currentBudget.year).forEach((payment) =>
         years.push(Number(payment.date.slice(0, 4))),
       );
@@ -466,7 +553,9 @@ import {
         : `${currentChild.code} · ${currentChild.name}`;
     const totals = capexTotals(visibleComponents, capexYear, currentBudget.year);
     $("#capex-head").innerHTML = capexHeadHtml(capexYear);
-    $("#capex-table").innerHTML = capexRowsHtml(visibleComponents, capexYear, currentBudget.year);
+    $("#capex-table").innerHTML = visibleComponents.length
+      ? capexRowsHtml(visibleComponents, capexYear, currentBudget.year)
+      : emptyTableRow(24);
     $("#capex-foot").innerHTML = capexTotalHtml(totals);
     $("#capex-year-summary").textContent =
       `Uscite ${euro.format(totals.annualCash)} · capitale residuo ${euro.format(totals.remainingPrincipal)}`;
@@ -1171,6 +1260,11 @@ import {
     renderBudgets();
     toast("Filtri applicati");
   });
+  $("#budget-search").addEventListener("input", renderBudgets);
+  $("#level-search").addEventListener("input", renderAnalysis);
+  $("#voice-search").addEventListener("input", renderAnalysis);
+  $("#monthly-search").addEventListener("input", renderMonthly);
+  $("#capex-search").addEventListener("input", renderCapex);
   $("#create-budget").addEventListener("click", () => openEdit("new"));
   $("#back-management").addEventListener("click", () => showPage("management"));
   $("#save-analysis").addEventListener("click", () => {
