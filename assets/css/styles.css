@@ -912,6 +912,17 @@ tbody tr[data-select-monthly] {
 .modal-body .full {
   grid-column: 1 / -1;
 }
+#planning-custom-fields:not([hidden]) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+#planning-custom-fields[hidden],
+#planning-parent-field[hidden],
+#planning-custom-parent-field[hidden],
+#planning-custom-parent-id:disabled {
+  display: none;
+}
 .payment-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

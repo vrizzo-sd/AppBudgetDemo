@@ -34,7 +34,7 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
   });
 
   if (!filtered.length) {
-    return '<tr><td colspan="9" class="center muted">Nessun budget corrisponde ai filtri.</td></tr>';
+    return '<tr><td colspan="8" class="center muted">Nessun budget corrisponde ai filtri.</td></tr>';
   }
 
   return filtered
@@ -42,7 +42,7 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
       const associatedStructure = budget.associatedStructure || "";
       return `
     <tr class="budget-row ${budget.state === "Disattivo" ? "budget-row-inactive" : "budget-row-active"}">
-      <td>${budget.year}</td><td>${escapeHtml(budget.name)}</td><td>${budget.version}</td><td>${escapeHtml(budget.frequency)}</td><td>${budget.revision}</td><td>${escapeHtml(associatedStructure)}</td><td><span class="status ${statusClass(budget.state)}">${escapeHtml(budget.state)}</span></td><td>${escapeHtml(budget.type)}</td>
+      <td>${budget.year}</td><td>${escapeHtml(budget.name)}</td><td>${budget.version}</td><td>${escapeHtml(budget.frequency)}</td><td>${budget.revision}</td><td>${escapeHtml(associatedStructure)}</td><td><span class="status ${statusClass(budget.state)}">${escapeHtml(budget.state)}</span></td>
       <td class="budget-actions"><button class="action-icon" type="button" aria-label="Modifica ${escapeHtml(budget.name)}, versione ${budget.version}" title="Modifica" data-edit-budget="${budget.id}">✎</button> <button class="action-icon" type="button" aria-label="Copia ${escapeHtml(budget.name)}, versione ${budget.version}" title="Copia" data-copy-budget="${budget.id}">⧉</button> <button class="action-icon danger" type="button" aria-label="Elimina ${escapeHtml(budget.name)}, versione ${budget.version}" title="Elimina" data-delete-budget="${budget.id}">🗑</button> <button class="btn small blue" type="button" data-open-budget="${budget.id}">Apri analisi</button></td>
     </tr>
   `;

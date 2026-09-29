@@ -47,7 +47,7 @@
         <div class="table-wrap">
           <table aria-label="Gestione budget analitici">
             <thead>
-              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Struttura analitica associata</th><th>Stato</th><th>Tipo budget</th><th>Azioni</th></tr>
+              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Struttura analitica associata</th><th>Stato</th><th>Azioni</th></tr>
             </thead>
             <tbody id="budget-list"></tbody>
           </table>
@@ -80,7 +80,7 @@
 
           <div class="analysis-grid">
             <section class="panel">
-              <div class="panel-title planning-title"><span>1. Livello 1</span><button class="btn primary small" type="button" id="add-l1">＋ Aggiungi</button></div>
+              <div class="panel-title planning-title"><span>1. Livello 1</span><button class="btn primary small" type="button" id="add-l1">＋ Aggiungi</button><button class="btn small" type="button" id="distribute-l1" title="Ripartisce il 100% in parti uguali tra tutti gli elementi di Livello 1">Ripartisci equamente</button></div>
               <div class="table-filter-bar compact">
                 <label for="level-search">Cerca</label>
                 <input class="table-search" id="level-search" type="search" placeholder="Codice o descrizione…" autocomplete="off">
@@ -90,7 +90,7 @@
             </section>
 
             <section class="panel">
-              <div class="panel-title planning-title"><span>2. Livello 2</span><button class="btn primary small" type="button" id="add-l2">＋ Aggiungi</button></div>
+              <div class="panel-title planning-title"><span>2. Livello 2</span><button class="btn primary small" type="button" id="add-l2">＋ Aggiungi</button><button class="btn small" type="button" id="distribute-l2" title="Ripartisce la percentuale di ogni padre in parti uguali tra i suoi elementi di Livello 2">Ripartisci equamente</button></div>
               <div class="table-filter-bar compact">
                 <label for="voice-search">Cerca</label>
                 <input class="table-search" id="voice-search" type="search" placeholder="Codice o descrizione…" autocomplete="off">

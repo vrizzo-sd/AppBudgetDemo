@@ -485,6 +485,10 @@ import {
   function renderAnalysis() {
     const planning = currentBudget.planning;
     const validation = planningValidation(planning);
+    $("#distribute-l1").disabled = planning.level1.length === 0;
+    $("#distribute-l2").hidden = planning.mode === "single-level";
+    $("#distribute-l2").disabled =
+      planning.mode === "single-level" || planning.level2.length === 0;
     const levelSearch = $("#level-search").value;
     const level2Search = $("#voice-search").value;
     const visibleLevel1 = planning.level1.filter((level) =>
@@ -559,15 +563,9 @@ import {
 
   function renderPlanningCrudControls() {
     const planning = currentBudget.planning;
-    const hasAvailable = (kind) => {
-      if (kind === "l1") return planning.catalog.level1.some((item) => !planning.level1.some((level) => normalizeCode(level.code) === normalizeCode(item.code)));
-      if (kind === "l2") return planning.mode !== "single-level" && planning.catalog.level2.some((item) => !planning.level2.some((level) => normalizeCode(level.code) === normalizeCode(item.code)) && planning.level1.some((parent) => normalizeCode(parent.code) === normalizeCode(item.parentCode)));
-      const levels = planning.mode === "single-level" ? planning.level1 : planning.level2;
-      return levels.some((level) => level.monthlyActive === false);
-    };
-    $("#add-l1").disabled = !hasAvailable("l1");
-    $("#add-l2").disabled = !hasAvailable("l2");
-    $("#add-monthly").disabled = !hasAvailable("monthly");
+    $("#add-l1").disabled = false;
+    $("#add-l2").disabled = planning.mode === "single-level" || !planning.level1.length;
+    $("#add-monthly").disabled = planning.mode !== "single-level" && !planning.level1.length;
   }
 
   async function refreshSqlSummaries(version = stateVersion) {
@@ -1228,6 +1226,11 @@ import {
     $("#edit-modal-title").textContent =
       type === "new" ? "Crea nuovo budget" : `Modifica budget ${budget.name}`;
     const associatedStructure = budget?.associatedStructure || "";
+    const associatedStructures = ["Struttura 1", "Struttura 2", "Struttura 3"];
+    const legacyStructureOption =
+      associatedStructure && !associatedStructures.includes(associatedStructure)
+        ? `<option value="${escapeHtml(associatedStructure)}" selected>${escapeHtml(associatedStructure)}</option>`
+        : "";
     $("#edit-modal-body").innerHTML = `
       <div class="field"><label for="edit-year">Anno</label><input id="edit-year" name="year" type="number" value="${budget?.year || 2027}" required></div>
       <div class="field"><label for="edit-name">Nome budget</label><input id="edit-name" name="name" value="${escapeHtml(budget?.name || "NUOVO BUDGET")}" required></div>
@@ -1235,9 +1238,10 @@ import {
       <div class="field"><label for="edit-revision">Revisione</label><input id="edit-revision" name="revision" type="number" value="${budget?.revision || 0}" required></div>
       <div class="field"><label for="edit-frequency">Periodicità</label><select id="edit-frequency" name="frequency"><option>Annuale</option><option>Mensile</option><option>Trimestrale</option><option>Vita utile</option></select></div>
       <div class="field"><label for="edit-type">Tipo budget</label><select id="edit-type" name="budgetType"><option>Ordinario</option><option>Investimento</option></select></div>
-      <div class="field full"><label for="edit-associated-structure">Struttura analitica associata</label><input id="edit-associated-structure" name="associatedStructure" value="${escapeHtml(associatedStructure)}" placeholder="Informazione libera"></div>
+      <div class="field full"><label for="edit-associated-structure">Struttura analitica associata</label><select id="edit-associated-structure" name="associatedStructure"><option value="">Seleziona una struttura</option>${associatedStructures.map((structure) => `<option value="${structure}">${structure}</option>`).join("")}${legacyStructureOption}</select></div>
       <div class="field"><label for="edit-state">Stato</label><select id="edit-state" name="state"><option>Attivo</option><option>Disattivo</option></select></div>
     `;
+    $("#edit-associated-structure").value = associatedStructure;
     if (budget) {
       $("#edit-frequency").value = budget.frequency;
       $("#edit-type").value = budget.type;
@@ -1519,6 +1523,7 @@ import {
     planningModalContext = context;
     $("#planning-modal-title").textContent = title;
     $("#planning-modal-body").innerHTML = fields;
+    $("#planning-code")?.addEventListener("input", (event) => event.target.setCustomValidity(""));
     planningModal.classList.add("open");
     planningModal.setAttribute("aria-hidden", "false");
     $("#planning-modal-body").querySelector("input,select")?.focus();
@@ -1529,19 +1534,37 @@ import {
     const field = (label, name, value, type = "number", attrs = "") => `<div class="field"><label for="planning-${name}">${label}</label><input id="planning-${name}" name="${name}" type="${type}" value="${escapeHtml(value)}" ${attrs}></div>`;
     const select = (label, name, options) => `<div class="field full"><label for="planning-${name}">${label}</label><select id="planning-${name}" name="${name}" required>${options}</select></div>`;
     const options = (items, selected = "") => items.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === selected ? "selected" : ""}>${escapeHtml(item.code)} · ${escapeHtml(item.name)}</option>`).join("");
+    const customFields = () => `<div class="field full" id="planning-custom-fields" hidden>${field("Codice", "code", "", "text", 'maxlength="40"')}${field("Descrizione", "name", "", "text", 'maxlength="120"')}</div>`;
+    const chooseCustom = (selectId) => {
+      const chooser = $(`#${selectId}`);
+      const custom = $("#planning-custom-fields");
+      if (!chooser || !custom) return;
+      const update = () => {
+        const isCustom = chooser.value === "__new__";
+        custom.hidden = !isCustom;
+        custom.querySelectorAll("input").forEach((input) => { input.required = isCustom; });
+      };
+      chooser.addEventListener("change", update);
+      update();
+    };
     const monthlyLevels = planning.mode === "single-level" ? planning.level1 : planning.level2;
     let fields = "";
     if (kind === "l1") {
       const item = id ? planning.level1.find((entry) => entry.id === id) : null;
       const available = planning.catalog.level1.filter((entry) => !planning.level1.some((level) => normalizeCode(level.code) === normalizeCode(entry.code)));
-      fields = isNew ? select("Struttura analitica", "catalog-id", options(available)) + field("Budget (€)", "budget", "0", "number", 'min="0" step="0.01" required') : field("Budget (€)", "budget", item.budget || 0, "number", 'min="0" step="0.01" required');
+      fields = isNew ? select("Struttura analitica", "catalog-id", `${options(available)}<option value="__new__">Nuova struttura analitica</option>`) + customFields() + field("Budget (€)", "budget", "0", "number", 'min="0" step="0.01" required') : field("Budget (€)", "budget", item.budget || 0, "number", 'min="0" step="0.01" required');
       showPlanningModal({ kind, id, isNew }, isNew ? "Aggiungi Livello 1" : `Modifica ${item.name}`, fields);
+      if (isNew) chooseCustom("planning-catalog-id");
     } else if (kind === "l2") {
       const item = id ? planning.level2.find((entry) => entry.id === id) : null;
       const available = planning.catalog.level2.filter((entry) => !planning.level2.some((level) => normalizeCode(level.code) === normalizeCode(entry.code)) && planning.level1.some((parent) => normalizeCode(parent.code) === normalizeCode(entry.parentCode)));
       const parents = planning.level1;
-      const parentId = item?.parentId || (selectedLevel1Ids.size === 1 ? [...selectedLevel1Ids][0] : "");
-      fields = (isNew ? select("Elemento struttura", "catalog-id", options(available)) : `<div class="field full"><label>Elemento</label><div class="readonly-value">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</div></div>`) + `<div class="field full"><label>Appartiene a</label><div class="readonly-value" id="planning-parent-label">${escapeHtml(parents.find((parent) => parent.id === parentId)?.code || "Seleziona un elemento")}</div><input type="hidden" name="parent-id" id="planning-parent-id" value="${escapeHtml(parentId)}"></div>`;
+      const selectedCatalogItem = available[0];
+      const catalogParent = parents.find((parent) => normalizeCode(parent.code) === normalizeCode(selectedCatalogItem?.parentCode));
+      const parentId = item?.parentId || catalogParent?.id || (selectedLevel1Ids.size === 1 ? [...selectedLevel1Ids][0] : "");
+      const selectedParent = parents.find((parent) => parent.id === parentId);
+      const parentLabel = selectedParent ? `${selectedParent.code} · ${selectedParent.name}` : "Seleziona un elemento";
+      fields = (isNew ? select("Elemento struttura", "catalog-id", `${options(available)}<option value="__new__">Nuovo elemento struttura</option>`) + customFields() : `<div class="field full"><label>Elemento</label><div class="readonly-value">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</div></div>`) + `<div class="field full" id="planning-parent-field"><label>Appartiene a</label><div class="readonly-value" id="planning-parent-label">${escapeHtml(parentLabel)}</div><input type="hidden" name="parent-id" id="planning-parent-id" value="${escapeHtml(parentId)}"></div>` + (isNew ? `<div class="field full" id="planning-custom-parent-field" hidden><label for="planning-custom-parent-id">Livello 1</label><select id="planning-custom-parent-id" name="custom-parent-id">${options(parents, parentId)}</select></div>` : "");
       showPlanningModal({ kind, id, isNew }, isNew ? "Aggiungi Livello 2" : `Modifica ${item.name}`, fields);
       const catalogSelect = $("#planning-catalog-id");
       catalogSelect?.addEventListener("change", () => {
@@ -1549,17 +1572,92 @@ import {
         const parent = planning.level1.find((entry) => normalizeCode(entry.code) === normalizeCode(selectedItem?.parentCode));
         $("#planning-parent-id").value = parent?.id || "";
         $("#planning-parent-label").textContent = parent ? `${parent.code} · ${parent.name}` : "Struttura padre non presente nel budget";
+        const custom = catalogSelect.value === "__new__";
+        $("#planning-parent-field").hidden = custom;
+        $("#planning-custom-parent-field").hidden = !custom;
       });
+      if (isNew) chooseCustom("planning-catalog-id");
+      if (catalogSelect?.value === "__new__") { $("#planning-parent-field").hidden = true; $("#planning-custom-parent-field").hidden = false; }
     } else {
       const item = monthlyLevels.find((entry) => entry.id === id);
       const choices = monthlyLevels.filter((entry) => entry.monthlyActive === false);
       const monthFields = months.map((name, index) => field(name, `month-${index}`, item?.months?.[index] || 0, "number", 'min="0" step="0.01"')).join("");
-      fields = (isNew ? select("Elemento da pianificare", "level-id", options(choices, selectedMonthlyIds.size === 1 ? [...selectedMonthlyIds][0] : "")) : `<div class="field full"><label>Elemento</label><div class="readonly-value">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</div></div>`) + `<div class="planning-month-fields">${monthFields}</div>`;
+      fields = (isNew ? select("Elemento da pianificare", "level-id", `${options(choices)}<option value="__new__">Nuova voce mensile</option>`) + customFields() + (planning.mode === "two-level" ? select("Livello 1 della nuova voce", "custom-parent-id", options(planning.level1)) : "") : `<div class="field full"><label>Elemento</label><div class="readonly-value">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</div></div>`) + `<div class="planning-month-fields">${monthFields}</div>`;
       showPlanningModal({ kind, id, isNew }, isNew ? "Aggiungi pianificazione mensile" : `Modifica ${item.name}`, fields);
+      if (isNew) {
+        chooseCustom("planning-level-id");
+        const parentField = $("#planning-custom-parent-id")?.closest(".field");
+        const updateParent = () => {
+          if (!parentField) return;
+          parentField.hidden = $("#planning-level-id").value !== "__new__";
+          $("#planning-custom-parent-id").required = !parentField.hidden;
+        };
+        $("#planning-level-id").addEventListener("change", updateParent);
+        updateParent();
+      }
     }
   };
   $("#add-l1").addEventListener("click", () => openPlanningForm("l1"));
   $("#add-l2").addEventListener("click", () => openPlanningForm("l2"));
+  const splitPercentage = (total, count) => {
+    const cents = Math.max(0, Math.round(Number(total || 0) * 100));
+    const base = Math.floor(cents / count);
+    const remainder = cents % count;
+    return Array.from(
+      { length: count },
+      (_, index) => (base + (index < remainder ? 1 : 0)) / 100,
+    );
+  };
+  $("#distribute-l1").addEventListener("click", () => {
+    const planning = currentBudget.planning;
+    const levels = planning.level1;
+    if (!levels.length) return;
+    const percentages = splitPercentage(100, levels.length);
+    const totalCents = Math.round(planningBaseTotal(planning) * 100);
+    let allocatedCents = 0;
+    levels.forEach((level, index) => {
+      level.totalPercent = percentages[index];
+      const budgetCents = index === levels.length - 1
+        ? totalCents - allocatedCents
+        : Math.round(totalCents * percentages[index] / 100);
+      level.budget = budgetCents / 100;
+      allocatedCents += budgetCents;
+    });
+    resizeDescendantMonths(planning);
+    renderAnalysis();
+    persist();
+    toast("Percentuali Livello 1 ripartite equamente sul 100%");
+  });
+  $("#distribute-l2").addEventListener("click", () => {
+    const planning = currentBudget.planning;
+    let distributed = false;
+    planning.level1.forEach((parent) => {
+      const children = planning.level2.filter(
+        (level) => level.parentId === parent.id,
+      );
+      if (!children.length) return;
+      distributed = true;
+      const parentPercent = Number(
+        parent.totalPercent ?? (
+          planningBaseTotal(planning) > 0
+            ? Number(parent.budget || 0) / planningBaseTotal(planning) * 100
+            : 0
+        ),
+      );
+      const percentages = splitPercentage(parentPercent, children.length);
+      children.forEach((level, index) => {
+        level.totalPercent = percentages[index];
+      });
+    });
+    if (!distributed) {
+      toast("Aggiungi prima almeno un elemento di Livello 2");
+      return;
+    }
+    resizeDescendantMonths(planning);
+    renderAnalysis();
+    persist();
+    toast("Percentuali Livello 2 ripartite equamente per ciascun padre");
+  });
   $("#add-monthly").addEventListener("click", () => openPlanningForm("monthly"));
   $("#close-planning-modal").addEventListener("click", closePlanningModal);
   $("#cancel-planning-modal").addEventListener("click", closePlanningModal);
@@ -1570,12 +1668,25 @@ import {
     if (!context) return;
     const data = new FormData(event.currentTarget);
     const planning = currentBudget.planning;
+    const customEntry = (levels, catalog) => {
+      const code = String(data.get("code") || "").trim();
+      const name = String(data.get("name") || "").trim();
+      if (!code || !name) { toast("Inserisci codice e descrizione"); return null; }
+      if ([...levels, ...catalog].some((level) => normalizeCode(level.code) === normalizeCode(code))) {
+        $("#planning-code").setCustomValidity("Il codice è già presente in questa tabella");
+        $("#planning-code").reportValidity();
+        return null;
+      }
+      return { id: `custom-${crypto.randomUUID()}`, code, name };
+    };
     if (context.kind === "l1") {
       if (context.isNew) {
-        const item = planning.catalog.level1.find((entry) => entry.id === data.get("catalog-id"));
+        const custom = data.get("catalog-id") === "__new__";
+        const item = custom ? customEntry(planning.level1, planning.catalog.level1) : planning.catalog.level1.find((entry) => entry.id === data.get("catalog-id"));
         if (!item) return;
         const amount = Number(data.get("budget") || 0);
-        const added = { ...clone(item), id: `l1-${currentBudget.id}-${normalizeCode(item.code)}`, budget: amount, totalPercent: planningBaseTotal(planning) > 0 ? amount / planningBaseTotal(planning) * 100 : 0, months: Array(12).fill(0), monthlyActive: false };
+        if (custom) planning.catalog.level1.push(clone(item));
+        const added = { ...clone(item), id: `l1-${currentBudget.id}-${item.id}`, budget: amount, totalPercent: planningBaseTotal(planning) > 0 ? amount / planningBaseTotal(planning) * 100 : 0, months: Array(12).fill(0), monthlyActive: false };
         planning.level1.push(added); selectedLevel1Ids = new Set([added.id]); selectedLevel2Ids = new Set(); selectedMonthlyIds = new Set();
       } else {
         const level = planning.level1.find((entry) => entry.id === context.id);
@@ -1583,10 +1694,12 @@ import {
       }
     } else if (context.kind === "l2") {
       if (context.isNew) {
-        const item = planning.catalog.level2.find((entry) => entry.id === data.get("catalog-id"));
-        const parent = planning.level1.find((entry) => entry.id === data.get("parent-id"));
-        if (!item || !parent || normalizeCode(parent.code) !== normalizeCode(item.parentCode)) { toast("L'elemento selezionato non appartiene alla struttura scelta"); return; }
-        const added = { ...clone(item), id: `l2-${currentBudget.id}-${normalizeCode(item.code)}`, parentId: parent.id, parentCode: parent.code, totalPercent: 0, months: Array(12).fill(0), monthlyActive: false };
+        const custom = data.get("catalog-id") === "__new__";
+        const item = custom ? customEntry(planning.level2, planning.catalog.level2) : planning.catalog.level2.find((entry) => entry.id === data.get("catalog-id"));
+        const parent = planning.level1.find((entry) => entry.id === data.get(custom ? "custom-parent-id" : "parent-id"));
+        if (!item || !parent || (!custom && normalizeCode(parent.code) !== normalizeCode(item.parentCode))) { toast("Seleziona un Livello 1 valido"); return; }
+        if (custom) planning.catalog.level2.push({ ...clone(item), parentId: parent.id, parentCode: parent.code });
+        const added = { ...clone(item), id: `l2-${currentBudget.id}-${item.id}`, parentId: parent.id, parentCode: parent.code, totalPercent: 0, months: Array(12).fill(0), monthlyActive: false };
         planning.level2.push(added); selectedLevel1Ids = new Set([parent.id]); selectedLevel2Ids = new Set([added.id]); selectedMonthlyIds = new Set();
       } else {
         const level = planning.level2.find((entry) => entry.id === context.id);
@@ -1595,8 +1708,20 @@ import {
       }
     } else {
       const levels = planning.mode === "single-level" ? planning.level1 : planning.level2;
-      const level = levels.find((entry) => entry.id === (context.isNew ? data.get("level-id") : context.id));
-      if (level) { level.monthlyActive = true; level.months = months.map((_, index) => Math.max(0, Number(data.get(`month-${index}`) || 0))); selectedMonthlyIds = new Set([level.id]); if (planning.mode === "single-level") selectedLevel1Ids = new Set([level.id]); else { selectedLevel2Ids = new Set([level.id]); const parent = planning.level1.find((entry) => entry.id === level.parentId); if (parent) selectedLevel1Ids = new Set([parent.id]); } }
+      const custom = context.isNew && data.get("level-id") === "__new__";
+      let level = levels.find((entry) => entry.id === (context.isNew ? data.get("level-id") : context.id));
+      if (custom) {
+        const item = customEntry(levels, planning.catalog[planning.mode === "single-level" ? "level1" : "level2"]);
+        if (!item) return;
+        const parent = planning.mode === "two-level" ? planning.level1.find((entry) => entry.id === data.get("custom-parent-id")) : null;
+        if (planning.mode === "two-level" && !parent) { toast("Seleziona un Livello 1 valido"); return; }
+        const values = months.map((_, index) => Number(data.get(`month-${index}`) || 0));
+        const total = values.reduce((sum, value) => sum + value, 0);
+        level = { ...item, ...(parent ? { parentId: parent.id, parentCode: parent.code } : {}), budget: total, totalPercent: planningBaseTotal(planning) > 0 ? total / planningBaseTotal(planning) * 100 : 0, months: values, monthlyActive: true };
+        levels.push(level);
+        planning.catalog[planning.mode === "single-level" ? "level1" : "level2"].push({ ...item, ...(parent ? { parentId: parent.id, parentCode: parent.code } : {}) });
+      }
+      if (level) { level.monthlyActive = true; level.months = months.map((_, index) => Number(data.get(`month-${index}`) || 0)); selectedMonthlyIds = new Set([level.id]); if (planning.mode === "single-level") selectedLevel1Ids = new Set([level.id]); else { selectedLevel2Ids = new Set([level.id]); const parent = planning.level1.find((entry) => entry.id === level.parentId); if (parent) selectedLevel1Ids = new Set([parent.id]); } }
     }
     closePlanningModal(); renderAnalysis(); persist();
   });
@@ -2049,6 +2174,7 @@ import {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      closePlanningModal();
       closeModal();
       closeVoiceModal();
       closeComponentModal();
