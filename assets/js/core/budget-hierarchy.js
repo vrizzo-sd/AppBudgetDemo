@@ -23,10 +23,22 @@ export function monthlyTotal(values) {
   return values.reduce((sum, value) => sum + Number(value || 0), 0);
 }
 
+export function planningYearMonths(level, year, budgetYear) {
+  return Number(year) === Number(budgetYear)
+    ? level.months
+    : level.yearMonths?.[year] || Array(12).fill(0);
+}
+
+export function planningAllYearsTotal(level) {
+  return monthlyTotal(level.months) + Object.values(level.yearMonths || {})
+    .reduce((sum, values) => sum + monthlyTotal(values), 0);
+}
+
 export function createBudgetPlanning(budget, sourceRows) {
   if (budget.type === "Investimento") {
     return {
       mode: "single-level",
+      budgetYear: budget.year,
       level1: budget.children.map((child) => {
         const months = rowMonths(sourceRows, child.code);
         return {
@@ -96,6 +108,7 @@ export function ensureBudgetPlanning(budget, sourceRows) {
     budget.planning = createBudgetPlanning(budget, sourceRows);
   }
   const planning = budget.planning;
+  if (budget.type === "Investimento") planning.budgetYear = budget.year;
   const currentPlanningTotal = planning.level1.reduce(
     (sum, level) => sum + Number(level.budget || 0),
     0,
@@ -110,6 +123,12 @@ export function ensureBudgetPlanning(budget, sourceRows) {
         : 0;
     }
   });
+  // Older investment drafts calculated percentages against the original demo total
+  // even after an amount edit. Percentages above 100% cannot come from the current
+  // percentage control, so restore them from the entered amounts when loading.
+  if (planning.mode === "single-level" && planning.level1.some((level) => Number(level.totalPercent) > 100.005)) {
+    syncSingleLevelBudgetPercentages(planning);
+  }
   planning.level1.forEach((level) => {
     if (level.monthlyActive === undefined) level.monthlyActive = true;
   });
@@ -150,6 +169,60 @@ export function planningTotal(planning) {
     (sum, level) => sum + Number(level.budget || 0),
     0,
   );
+}
+
+export function syncSingleLevelBudgetPercentages(planning) {
+  if (planning.mode !== "single-level") return;
+  const total = planningTotal(planning);
+  planning.totalBudget = total;
+  planning.level1.forEach((level) => {
+    level.totalPercent = total > 0 ? Number(level.budget || 0) / total * 100 : 0;
+  });
+}
+
+export function syncRedistributedBudget(planning, level, previousAmount, nextAmount) {
+  if (planning.mode === "single-level") {
+    level.budget = nextAmount;
+    syncSingleLevelBudgetPercentages(planning);
+    return true;
+  }
+  const parent = planning.level1.find((item) => item.id === level.parentId);
+  if (!parent) return false;
+  parent.budget = Math.round((Number(parent.budget || 0) + nextAmount - previousAmount) * 100) / 100;
+  const total = planningTotal(planning);
+  planning.totalBudget = total;
+  planning.level1.forEach((item) => {
+    item.totalPercent = total > 0 ? Number(item.budget || 0) / total * 100 : 0;
+  });
+  planning.level2.forEach((item) => {
+    item.totalPercent = total > 0 ? monthlyTotal(item.months) / total * 100 : 0;
+  });
+  return true;
+}
+
+export function setPlanningMonthAmount(planning, level, year, month, amount) {
+  if (!Number.isInteger(month) || month < 0 || month > 11 ||
+      !Number.isFinite(amount) || amount < 0 ||
+      Math.abs(Math.round(amount * 100) - amount * 100) > 1e-7) return false;
+  if (planning.mode !== "single-level" &&
+      !planning.level1.some((item) => item.id === level.parentId)) return false;
+  const previousAmount = planning.mode === "single-level"
+    ? planningAllYearsTotal(level)
+    : monthlyTotal(level.months);
+  let values = level.months;
+  if (planning.mode === "single-level" && Number(year) !== Number(planning.budgetYear)) {
+    level.yearMonths ||= {};
+    level.yearMonths[year] ||= Array(12).fill(0);
+    values = level.yearMonths[year];
+  }
+  values[month] = Math.round(amount * 100) / 100;
+  const nextAmount = planning.mode === "single-level"
+    ? planningAllYearsTotal(level)
+    : monthlyTotal(level.months);
+  if (Math.round(nextAmount * 100) !== Math.round(previousAmount * 100)) {
+    syncRedistributedBudget(planning, level, previousAmount, nextAmount);
+  }
+  return true;
 }
 
 export function planningBaseTotal(planning) {
@@ -198,7 +271,7 @@ export function planningValidation(planning) {
       ? planning.level1.filter(
           (level) =>
             level.monthlyActive === false ||
-            Math.abs(monthlyTotal(level.months) - Number(level.budget || 0)) >
+            Math.abs(planningAllYearsTotal(level) - Number(level.budget || 0)) >
             0.005,
         )
       : planning.level2.filter(

@@ -4,6 +4,8 @@ import {
   levelPercentOfTotal,
   planningBaseTotal,
   monthlyTotal,
+  planningAllYearsTotal,
+  planningYearMonths,
   planningTotal,
 } from "../core/budget-hierarchy.js";
 
@@ -104,6 +106,7 @@ export function hierarchyMonthlyRowsHtml(
   editingIds = new Set(),
   adjustmentView = false,
   adjustmentFor = () => ({ approved: 0, draft: 0 }),
+  selectedYear = planning.budgetYear,
 ) {
   return levels
     .filter((level) => level.monthlyActive !== false)
@@ -112,12 +115,15 @@ export function hierarchyMonthlyRowsHtml(
         planning.mode === "single-level"
           ? Number(level.budget || 0)
           : level2Budget(planning, level);
-      const actual = monthlyTotal(level.months);
-      const difference = actual - expected;
+      const yearMonths = planning.mode === "single-level"
+        ? planningYearMonths(level, selectedYear, planning.budgetYear)
+        : level.months;
+      const actual = monthlyTotal(yearMonths);
+      const difference = (planning.mode === "single-level" ? planningAllYearsTotal(level) : actual) - expected;
       const invalid = validation.monthlyErrors.some(
         (item) => item.id === level.id,
       );
-      const monthCells = level.months.map((value, month) => {
+      const monthCells = yearMonths.map((value, month) => {
         const item = adjustmentFor(level.id, month);
         const baseCell = `<td class="num"><input class="planning-number month-value" data-plan-month="${month}" data-plan-level="${escapeHtml(level.id)}" type="number" min="0" step="0.01" value="${Number(value || 0).toFixed(2)}" aria-label="Mese ${month + 1} di ${escapeHtml(level.name)}"></td>`;
         const adjustmentCell = adjustmentView ? `<td class="num adjustment-cell"><input class="planning-number adjustment-value" data-adjust-level="${escapeHtml(level.id)}" data-adjust-month="${month}" type="number" step="0.01" value="${Number(item.approved || 0).toFixed(2)}" aria-label="Rettifica applicata ${month + 1} di ${escapeHtml(level.name)}"><small>Budget mese ${euro.format(Number(value) + item.approved)}</small>${item.pending ? `<small>In approvazione ${euro.format(item.pending)}</small>` : ""}</td>` : "";
@@ -137,11 +143,14 @@ export function hierarchyMonthlyTotalHtml(
     : planning.level2,
   adjustmentView = false,
   adjustmentFor = () => ({ approved: 0 }),
+  selectedYear = planning.budgetYear,
 ) {
   const activeLevels = levels.filter((level) => level.monthlyActive !== false);
   const monthTotals = Array.from({ length: 12 }, (_, month) =>
     activeLevels.reduce(
-      (sum, level) => sum + Number(level.months?.[month] || 0),
+      (sum, level) => sum + Number((planning.mode === "single-level"
+        ? planningYearMonths(level, selectedYear, planning.budgetYear)
+        : level.months)?.[month] || 0),
       0,
     ),
   );

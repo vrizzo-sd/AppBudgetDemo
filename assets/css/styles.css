@@ -270,6 +270,12 @@ textarea:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--wg-blue) 28%, transparent);
   border-color: var(--wg-blue);
 }
+#monthly-year {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--wg-line-strong);
+  background: var(--wg-input);
+}
 
 .table-wrap {
   overflow-x: auto;
@@ -979,7 +985,7 @@ tbody tr[data-select-monthly] {
 }
 .distribution-fields {
   display: grid;
-  grid-template-columns: 1fr 0.8fr 1.25fr 1.05fr 0.8fr;
+  grid-template-columns: 1fr 0.8fr 1.25fr 1.05fr;
   gap: 10px;
   padding: 12px 14px 8px;
 }
