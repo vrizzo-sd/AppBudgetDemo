@@ -8,11 +8,21 @@ import {
 } from "./core/formatters.js";
 import { budgetRowsHtml } from "./components/budget-list.js";
 import {
+  hierarchyLevel1RowsHtml,
+  hierarchyLevel2RowsHtml,
+  hierarchyMonthlyRowsHtml,
+  hierarchyMonthlyTotalHtml,
   levelRowsHtml,
   monthlyRowsHtml,
   monthlyTotalHtml,
   voiceRowsHtml,
 } from "./components/analysis-tables.js";
+import {
+  ensureBudgetPlanning,
+  planningBaseTotal,
+  planningTotal,
+  planningValidation,
+} from "./core/budget-hierarchy.js";
 import {
   capexHeadHtml,
   capexRowsHtml,
@@ -28,6 +38,7 @@ import {
   generateInstallments,
   scheduleTotals,
 } from "./core/capex-plan.js";
+import { copyBudgetWithNextVersion } from "./core/budget-versioning.js";
 import {
   capexComponentsDefault,
   defaultBudgets,
@@ -42,6 +53,7 @@ import {
   let investmentRows = load("wg-mockup-investment-rows", investmentDemoRows);
 
   let budgets = load("wg-mockup-budgets", defaultBudgets);
+  normalizeBudgetStates();
   let adjustments = load("wg-mockup-adjustments", [
     {
       id: "RET-0042",
@@ -81,9 +93,26 @@ import {
   let planDirty = false;
   let redistributionRowId = null;
   let redistributionNature = "cost";
+  let monthlyAdjustmentsVisible = false;
+  const adjustmentSaveTimers = new Map();
+  let selectedLevel1Ids = new Set();
+  let selectedLevel2Ids = new Set();
+  let selectedMonthlyIds = new Set();
+  let editingLevel1Ids = new Set();
+  let editingLevel2Ids = new Set();
+  let editingMonthlyIds = new Set();
   let apiAvailable = false;
   let apiSaveTimer = null;
   let stateVersion = 0;
+
+  function normalizeBudgetStates() {
+    budgets.forEach((budget) => {
+      if (budget.state === "Attivo" || budget.state === "Disattivo") return;
+      budget.state = ["Creato", "Completato"].includes(budget.state)
+        ? "Attivo"
+        : "Disattivo";
+    });
+  }
 
   function normalizePayments(payments) {
     if (payments?.length === 12)
@@ -158,6 +187,50 @@ import {
   }
   ensureCompleteDemoRows();
 
+  function ensureAllBudgetPlanning() {
+    budgets.forEach((budget) =>
+      ensureBudgetPlanning(
+        budget,
+        budget.type === "Investimento"
+          ? investmentRows.cost
+          : ordinaryRows.cost,
+      ),
+    );
+    const level1Catalog = new Map();
+    const level2Catalog = new Map();
+    budgets
+      .filter((budget) => budget.type === "Ordinario")
+      .forEach((budget) => {
+        budget.planning.level1.forEach((level) =>
+          level1Catalog.set(normalizeCode(level.code), {
+            id: `catalog-l1-${normalizeCode(level.code)}`,
+            code: level.code,
+            name: level.name,
+          }),
+        );
+        budget.planning.level2.forEach((level) => {
+          const parent = budget.planning.level1.find(
+            (item) => item.id === level.parentId,
+          );
+          level2Catalog.set(normalizeCode(level.code), {
+            id: `catalog-l2-${normalizeCode(level.code)}`,
+            parentCode: level.parentCode || parent?.code,
+            code: level.code,
+            name: level.name,
+          });
+        });
+      });
+    budgets
+      .filter((budget) => budget.type === "Ordinario")
+      .forEach((budget) => {
+        budget.planning.catalog = {
+          level1: [...level1Catalog.values()].map(clone),
+          level2: [...level2Catalog.values()].map(clone),
+        };
+      });
+  }
+  ensureAllBudgetPlanning();
+
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -221,6 +294,7 @@ import {
       apiAvailable = true;
       if (Array.isArray(state.budgets) && state.budgets.length) {
         budgets = state.budgets;
+        normalizeBudgetStates();
         adjustments = Array.isArray(state.adjustments)
           ? state.adjustments
           : adjustments;
@@ -230,6 +304,7 @@ import {
         ordinaryRows = state.ordinaryRows || ordinaryRows;
         investmentRows = state.investmentRows || investmentRows;
         ensureCompleteDemoRows();
+        ensureAllBudgetPlanning();
         currentBudget = budgets[0];
         currentChild = currentBudget.children[0];
         renderBudgets();
@@ -281,12 +356,14 @@ import {
   function matchesSearch(values, search) {
     const term = normalizeSearch(search.trim());
     return (
-      !term ||
-      values.some((value) => normalizeSearch(value).includes(term))
+      !term || values.some((value) => normalizeSearch(value).includes(term))
     );
   }
 
-  function emptyTableRow(columns, label = "Nessuna riga corrisponde alla ricerca.") {
+  function emptyTableRow(
+    columns,
+    label = "Nessuna riga corrisponde alla ricerca.",
+  ) {
     return `<tr><td colspan="${columns}" class="center muted">${label}</td></tr>`;
   }
 
@@ -325,172 +402,212 @@ import {
     );
   }
 
-  function openAnalysis(budgetId, childId) {
+  function planningLevel(id) {
+    const planning = currentBudget.planning;
+    return (planning.mode === "single-level" ? planning.level1 : planning.level2)
+      .find((level) => level.id === id);
+  }
+
+  function planningAdjustment(levelId, month) {
+    return adjustments
+      .filter((item) => item.scope === "planning" && item.budgetId === currentBudget.id && item.rowId === levelId && item.month === month)
+      .reduce((totals, item) => {
+        if (item.status === "Approvata") totals.approved += Number(item.amount);
+        if (item.status === "Bozza") totals.draft += Number(item.amount);
+        if (item.status === "In approvazione") totals.pending += Number(item.amount);
+        if (item.status === "Bozza" && !totals.reason) totals.reason = item.reason || "";
+        return totals;
+      }, { approved: 0, draft: 0, pending: 0, reason: "" });
+  }
+
+  function flushInlineAdjustments() {
+    if (!adjustmentSaveTimers.size) return;
+    adjustmentSaveTimers.forEach((timer) => clearTimeout(timer));
+    adjustmentSaveTimers.clear();
+    [...document.querySelectorAll("#monthly-table [data-adjust-month]")].forEach((input) => {
+      if (Math.round(Number(input.value) * 100) !== Math.round(planningAdjustment(input.dataset.adjustLevel, Number(input.dataset.adjustMonth)).approved * 100)) {
+        applyInlineAdjustment(input.dataset.adjustLevel, Number(input.dataset.adjustMonth), input.value);
+      }
+    });
+  }
+
+  function openAnalysis(budgetId) {
+    flushInlineAdjustments();
     currentBudget = budgets.find((b) => b.id === budgetId) || budgets[0];
-    currentChild =
-      currentBudget.children.find((c) => c.id === childId) ||
-      currentBudget.children[0];
-    analysisScope = childId ? "child" : "budget";
-    currentNature = "cost";
+    currentChild = currentBudget.children[0];
+    analysisScope = "budget";
+    selectedLevel1Ids = new Set();
+    selectedLevel2Ids = new Set();
+    selectedMonthlyIds = new Set();
+    editingLevel1Ids = new Set();
+    editingLevel2Ids = new Set();
+    editingMonthlyIds = new Set();
+    ensureBudgetPlanning(
+      currentBudget,
+      currentBudget.type === "Investimento"
+        ? investmentRows.cost
+        : ordinaryRows.cost,
+    );
     ["level-search", "voice-search", "monthly-search", "capex-search"].forEach(
       (id) => {
         $(`#${id}`).value = "";
       },
     );
-    $("#analysis-name").textContent =
-      analysisScope === "budget" ? currentBudget.name : currentChild.name;
-    $("#analysis-code").textContent =
-      analysisScope === "budget"
-        ? `Budget ${currentBudget.name}`
-        : currentChild.code;
+    $("#analysis-name").textContent = currentBudget.name;
+    $("#analysis-code").textContent = `Budget ${currentBudget.name}`;
     $("#analysis-period").textContent = currentBudget.year;
     capexYear = currentBudget.year;
-    $("#analysis-status").textContent =
-      analysisScope === "budget" ? currentBudget.state : currentChild.state;
+    $("#analysis-status").textContent = currentBudget.state;
     $("#analysis-status").className =
-      `status ${statusClass(analysisScope === "budget" ? currentBudget.state : currentChild.state)}`;
+      `status ${statusClass(currentBudget.state)}`;
     $("#analysis-type").value = currentBudget.type;
     $("#analysis-budget-field").innerHTML = budgets
       .filter((budget) => budget.type === currentBudget.type)
       .map(
         (budget) =>
-          `<option value="${escapeHtml(budget.id)}">${escapeHtml(budget.name)} ${budget.year}</option>`,
+          `<option value="${escapeHtml(budget.id)}">${escapeHtml(budget.name)} ${budget.year} · Versione ${budget.version}</option>`,
       )
       .join("");
     $("#analysis-budget-field").value = currentBudget.id;
     $("#analysis-structure-field").value =
-      analysisScope === "budget"
-        ? `Tutti i livelli (${currentBudget.children.length})`
-        : currentChild.name;
+      currentBudget.associatedStructure || currentBudget.name;
     $("#analysis-frequency").value =
       currentBudget.frequency === "Vita utile"
         ? "Annuale"
         : currentBudget.frequency;
     $("#analysis-duration").value = "12 mesi (anno)";
-    const investment = currentBudget.type === "Investimento";
-    $("#monthly-panel").hidden = investment;
-    $("#capex-panel").hidden = !investment;
+    $("#monthly-panel").hidden = false;
+    $("#capex-panel").hidden = true;
     renderAnalysis();
     showPage("analysis");
-    refreshSqlSummaries();
   }
 
   function renderAnalysis() {
-    const rows = rowsForCurrent();
-    const levels =
-      analysisScope === "budget" ? currentBudget.children : [currentChild];
-    const investment = currentBudget.type === "Investimento";
-    const visibleLevels = levels.filter((level) =>
-      matchesSearch(
-        [level.code, level.name, level.fundingSource],
-        $("#level-search").value,
-      ),
+    const planning = currentBudget.planning;
+    const validation = planningValidation(planning);
+    const levelSearch = $("#level-search").value;
+    const level2Search = $("#voice-search").value;
+    const visibleLevel1 = planning.level1.filter((level) =>
+      matchesSearch([level.code, level.name], levelSearch),
     );
-    const visibleRows = {
-      cost: rows.cost.filter((row) =>
-        matchesSearch(
-          [row.code, row.description, row.voice, row.account],
-          $("#voice-search").value,
-        ),
-      ),
-      revenue: rows.revenue.filter((row) =>
-        matchesSearch(
-          [row.code, row.description, row.voice, row.account],
-          $("#voice-search").value,
-        ),
-      ),
-    };
+    const visibleLevel2 = planning.level2.filter(
+      (level) =>
+        (!selectedLevel1Ids.size || selectedLevel1Ids.has(level.parentId)) &&
+        matchesSearch([level.code, level.name], level2Search),
+    );
     $("#level-head").innerHTML =
-      `<th>Codice</th><th>Descrizione</th>${investment ? "<th>Fonte di finanziamento</th>" : ""}<th class="num">Tot. ricavi</th><th class="num">Tot. costi</th>`;
-    $("#level-table").innerHTML = visibleLevels.length
-      ? levelRowsHtml(visibleLevels, rows, rowTotal, investment)
-      : emptyTableRow(investment ? 5 : 4);
-    $("#voice-table").innerHTML =
-      visibleRows.cost.length || visibleRows.revenue.length
-        ? voiceRowsHtml(visibleRows, rowTotal)
-        : emptyTableRow(7);
+      '<th>Codice</th><th>Descrizione</th><th class="num">Budget</th><th class="num">% sul totale</th><th>Azioni</th>';
+    $("#level-table").innerHTML = hierarchyLevel1RowsHtml(
+      planning,
+      validation,
+      visibleLevel1,
+      selectedLevel1Ids,
+      editingLevel1Ids,
+    );
+    $("#voice-table").innerHTML = hierarchyLevel2RowsHtml(
+      planning,
+      validation,
+      visibleLevel2,
+      selectedLevel2Ids,
+      editingLevel2Ids,
+    );
+    const allocationPercent = planning.level1.reduce(
+      (sum, level) => sum + Number(level.totalPercent || 0),
+      0,
+    );
+    const allocationDelta = allocationPercent - 100;
+    const allocationMessage = $("#level1-allocation-message");
+    if (Math.abs(allocationDelta) > 0.005) {
+      const amountDelta = Math.abs(planningBaseTotal(planning) * allocationDelta / 100);
+      allocationMessage.hidden = false;
+      allocationMessage.classList.toggle("over", allocationDelta > 0);
+      allocationMessage.textContent = allocationDelta > 0
+        ? `Percentuali Livello 1: ${allocationPercent.toFixed(2)}% — superi il totale di ${euro.format(amountDelta)}. Riduci le quote che vuoi: le altre non cambiano.`
+        : `Percentuali Livello 1: ${allocationPercent.toFixed(2)}% — resta da assegnare ${Math.abs(allocationDelta).toFixed(2)}% (${euro.format(amountDelta)}). Puoi completare la ripartizione sulle altre righe.`;
+    } else {
+      allocationMessage.hidden = true;
+      allocationMessage.classList.remove("over");
+    }
+    const level2Message = $("#level2-allocation-message");
+    const level2Issues = [];
+    planning.level1.forEach((parent) => {
+      const children = planning.level2.filter((level) => level.parentId === parent.id);
+      if (!children.length) return;
+      const sum = children.reduce((total, level) => total + Number(level.totalPercent || 0), 0);
+      const expected = Number(parent.totalPercent ?? (planningBaseTotal(planning) > 0 ? Number(parent.budget || 0) / planningBaseTotal(planning) * 100 : 0));
+      const delta = sum - expected;
+      if (Math.abs(delta) <= 0.005) return;
+      const amount = Math.abs(planningBaseTotal(planning) * delta / 100);
+      level2Issues.push(delta > 0
+        ? `${parent.code} · ${parent.name}: i figli superano la quota del padre di ${delta.toFixed(2)} punti (${euro.format(amount)}). Riduci le percentuali sul totale.`
+        : `${parent.code} · ${parent.name}: ai figli manca ${Math.abs(delta).toFixed(2)}% (${euro.format(amount)}) per quadrarsi con il budget del padre.`);
+    });
+    if (validation.level2TotalPercentError) {
+      const delta = validation.level2TotalPercent - 100;
+      const amount = Math.abs(planningBaseTotal(planning) * delta / 100);
+      level2Issues.push(delta > 0
+        ? `% sul totale: superi il 100% di ${delta.toFixed(2)} punti (${euro.format(amount)}).`
+        : `% sul totale: manca ${Math.abs(delta).toFixed(2)}% (${euro.format(amount)}) per arrivare al 100%.`);
+    }
+    level2Message.hidden = level2Issues.length === 0;
+    level2Message.classList.toggle("over", level2Issues.some((message) => message.includes("superi")));
+    level2Message.textContent = level2Issues.join(" ");
+    renderPlanningCrudControls();
     renderMonthly();
-    renderCapex();
     renderAdjustments();
   }
 
+  function renderPlanningCrudControls() {
+    const planning = currentBudget.planning;
+    const hasAvailable = (kind) => {
+      if (kind === "l1") return planning.catalog.level1.some((item) => !planning.level1.some((level) => normalizeCode(level.code) === normalizeCode(item.code)));
+      if (kind === "l2") return planning.mode !== "single-level" && planning.catalog.level2.some((item) => !planning.level2.some((level) => normalizeCode(level.code) === normalizeCode(item.code)) && planning.level1.some((parent) => normalizeCode(parent.code) === normalizeCode(item.parentCode)));
+      const levels = planning.mode === "single-level" ? planning.level1 : planning.level2;
+      return levels.some((level) => level.monthlyActive === false);
+    };
+    $("#add-l1").disabled = !hasAvailable("l1");
+    $("#add-l2").disabled = !hasAvailable("l2");
+    $("#add-monthly").disabled = !hasAvailable("monthly");
+  }
+
   async function refreshSqlSummaries(version = stateVersion) {
-    if (!apiAvailable || !$("#page-analysis").classList.contains("active"))
-      return;
-    const budgetId = currentBudget.id;
-    try {
-      const response = await fetch(
-        `/api/analysis?budgetId=${encodeURIComponent(budgetId)}`,
-      );
-      if (!response.ok) return;
-      const summary = await response.json();
-      if (
-        version !== stateVersion ||
-        budgetId !== currentBudget.id ||
-        !$("#page-analysis").classList.contains("active")
-      )
-        return;
-      const rows = rowsForCurrent();
-      const levels =
-        analysisScope === "budget" ? currentBudget.children : [currentChild];
-      const visibleLevels = levels.filter((level) =>
-        matchesSearch(
-          [level.code, level.name, level.fundingSource],
-          $("#level-search").value,
-        ),
-      );
-      const visibleRows = {
-        cost: rows.cost.filter((row) =>
-          matchesSearch(
-            [row.code, row.description, row.voice, row.account],
-            $("#voice-search").value,
-          ),
-        ),
-        revenue: rows.revenue.filter((row) =>
-          matchesSearch(
-            [row.code, row.description, row.voice, row.account],
-            $("#voice-search").value,
-          ),
-        ),
-      };
-      $("#level-table").innerHTML = visibleLevels.length
-        ? levelRowsHtml(
-            visibleLevels,
-            rows,
-            rowTotal,
-            currentBudget.type === "Investimento",
-            summary.levels,
-          )
-        : emptyTableRow(currentBudget.type === "Investimento" ? 5 : 4);
-      $("#voice-table").innerHTML =
-        visibleRows.cost.length || visibleRows.revenue.length
-          ? voiceRowsHtml(visibleRows, rowTotal, summary.items)
-          : emptyTableRow(7);
-    } catch {
-      /* Il calcolo locale resta disponibile se il server SQL non risponde. */
-    }
+    void version;
   }
 
   function renderMonthly() {
-    const rows = rowsForCurrent()[currentNature].filter((row) =>
-      matchesSearch(
-        [row.code, row.description, row.voice, row.account],
-        $("#monthly-search").value,
-      ),
+    flushInlineAdjustments();
+    const planning = currentBudget.planning;
+    const validation = planningValidation(planning);
+    const search = $("#monthly-search").value;
+    const levels =
+      planning.mode === "single-level" ? planning.level1 : planning.level2;
+    const targetIds =
+      planning.mode === "single-level"
+        ? selectedLevel1Ids
+        : selectedLevel2Ids;
+    const visibleLevels = levels.filter(
+      (level) =>
+        (!targetIds.size || targetIds.has(level.id)) &&
+        matchesSearch([level.code, level.name], search),
     );
-    const title = currentNature === "cost" ? "COSTI" : "RICAVI";
-    const grand = rows.reduce((sum, row) => sum + rowTotal(row), 0);
-    $("#grand-total").textContent = `TOTALE ${title}: ${euro.format(grand)}`;
-    $("#monthly-table").innerHTML = rows.length
-      ? monthlyRowsHtml(rows, rowTotal, getApprovedAdjustment)
-      : emptyTableRow(18);
-    $("#monthly-foot").innerHTML = monthlyTotalHtml(title, grand);
-    $$("[data-nature-tab]").forEach((button) =>
-      button.setAttribute(
-        "aria-selected",
-        String(button.dataset.natureTab === currentNature),
-      ),
+    $("#grand-total").textContent =
+      `TOTALE BUDGET: ${euro.format(planningTotal(planning))}`;
+    $("#monthly-head").innerHTML = `<th>Codice</th><th>Descrizione</th>${months.map((month) => `<th>${month}</th>${monthlyAdjustmentsVisible ? `<th class="adjustment-head">Rett. ${month}</th>` : ""}`).join("")}<th class="num">Totale base</th>${monthlyAdjustmentsVisible ? '<th class="num">Rettifiche</th><th class="num">Budget aggiornato</th>' : ""}<th class="num">Differenza</th><th>Azioni</th>`;
+    $("#monthly-table").innerHTML = hierarchyMonthlyRowsHtml(
+      planning,
+      validation,
+      visibleLevels,
+      selectedMonthlyIds,
+      editingMonthlyIds,
+      monthlyAdjustmentsVisible,
+      planningAdjustment,
     );
+    if (!visibleLevels.length) {
+      $("#monthly-table").innerHTML =
+        `<tr><td colspan="${monthlyAdjustmentsVisible ? 31 : 17}" class="center muted">Nessuna pianificazione disponibile.</td></tr>`;
+    }
+    $("#monthly-foot").innerHTML =
+      hierarchyMonthlyTotalHtml(planning, visibleLevels, monthlyAdjustmentsVisible, planningAdjustment);
   }
 
   function capexForCurrent() {
@@ -536,22 +653,31 @@ import {
       if (component.inServiceDate) {
         const startYear = Number(component.inServiceDate.slice(0, 4));
         const startMonth = Number(component.inServiceDate.slice(5, 7));
-        years.push(startYear + Number(component.life) - (startMonth === 1 ? 1 : 0));
+        years.push(
+          startYear + Number(component.life) - (startMonth === 1 ? 1 : 0),
+        );
       }
     });
     const firstYear = Math.min(...years);
     const lastYear = Math.max(...years);
-    if (capexYear < firstYear || capexYear > lastYear) capexYear = currentBudget.year;
+    if (capexYear < firstYear || capexYear > lastYear)
+      capexYear = currentBudget.year;
     $("#capex-year").innerHTML = Array.from(
       { length: lastYear - firstYear + 1 },
       (_, index) => firstYear + index,
-    ).map((year) => `<option value="${year}">${year}</option>`).join("");
+    )
+      .map((year) => `<option value="${year}">${year}</option>`)
+      .join("");
     $("#capex-year").value = String(capexYear);
     $("#capex-scope-label").textContent =
       analysisScope === "budget"
         ? `Commesse di ${currentBudget.name}`
         : `${currentChild.code} · ${currentChild.name}`;
-    const totals = capexTotals(visibleComponents, capexYear, currentBudget.year);
+    const totals = capexTotals(
+      visibleComponents,
+      capexYear,
+      currentBudget.year,
+    );
     $("#capex-head").innerHTML = capexHeadHtml(capexYear);
     $("#capex-table").innerHTML = visibleComponents.length
       ? capexRowsHtml(visibleComponents, capexYear, currentBudget.year)
@@ -706,50 +832,94 @@ import {
     const serviceDate = $("#component-service-date").value;
     $("#component-depreciation").readOnly = Boolean(serviceDate);
     if (serviceDate) {
-      $("#component-depreciation").value = annualDepreciation({
-        approved: amount, adjustment, life: Number($("#component-life").value),
-        inServiceDate: serviceDate,
-      }, currentBudget.year, currentBudget.year).toFixed(2);
+      $("#component-depreciation").value = annualDepreciation(
+        {
+          approved: amount,
+          adjustment,
+          life: Number($("#component-life").value),
+          inServiceDate: serviceDate,
+        },
+        currentBudget.year,
+        currentBudget.year,
+      ).toFixed(2);
     }
     if (mode === "manuale") {
-      const planned = draftManualPayments.reduce((sum, value) => sum + Math.round(value * 100), 0);
+      const planned = draftManualPayments.reduce(
+        (sum, value) => sum + Math.round(value * 100),
+        0,
+      );
       const difference = Math.round(updated * 100) - planned;
       $("#component-payment-summary").textContent =
         `Pagamenti ${currentBudget.year}: ${euro.format(planned / 100)} di ${euro.format(updated)} · Differenza: ${euro.format(difference / 100)}`;
-      $("#component-payment-summary").classList.toggle("invalid", difference !== 0);
+      $("#component-payment-summary").classList.toggle(
+        "invalid",
+        difference !== 0,
+      );
     } else {
       const totals = scheduleTotals(draftSchedule);
       const difference = Math.round(updated * 100) - totals.principal;
-      const year = Number($("#component-plan-year").value || currentBudget.year);
-      const annual = annualPaymentSummary({
-        approved: amount, adjustment, paymentSchedule: draftSchedule, payments: [],
-      }, year, currentBudget.year);
+      const year = Number(
+        $("#component-plan-year").value || currentBudget.year,
+      );
+      const annual = annualPaymentSummary(
+        {
+          approved: amount,
+          adjustment,
+          paymentSchedule: draftSchedule,
+          payments: [],
+        },
+        year,
+        currentBudget.year,
+      );
       $("#component-payment-summary").textContent = planDirty
         ? "Piano da generare: premi “Genera piano rate” dopo aver completato i parametri."
         : `Intero piano: capitale ${euro.format(totals.principal / 100)} · interessi ${euro.format(totals.interest / 100)} · uscite ${year}: ${euro.format(annual.cashTotal)} · capitale da pianificare: ${euro.format(difference / 100)}`;
-      $("#component-payment-summary").classList.toggle("invalid", planDirty || difference !== 0);
+      $("#component-payment-summary").classList.toggle(
+        "invalid",
+        planDirty || difference !== 0,
+      );
     }
     $("#component-amount").setCustomValidity("");
   }
 
   function renderComponentPaymentFields(selectedYear = currentBudget.year) {
     const mode = $("#component-payment-mode").value;
-    const years = mode === "manuale"
-      ? [currentBudget.year]
-      : [...new Set([currentBudget.year, ...draftSchedule.map((payment) => Number(payment.date.slice(0, 4)))])].sort((a, b) => a - b);
+    const years =
+      mode === "manuale"
+        ? [currentBudget.year]
+        : [
+            ...new Set([
+              currentBudget.year,
+              ...draftSchedule.map((payment) =>
+                Number(payment.date.slice(0, 4)),
+              ),
+            ]),
+          ].sort((a, b) => a - b);
     $("#component-plan-year").innerHTML = years
-      .map((year) => `<option value="${year}">${year}</option>`).join("");
-    $("#component-plan-year").value = String(years.includes(selectedYear) ? selectedYear : currentBudget.year);
-    const annual = mode === "manuale"
-      ? draftManualPayments
-      : annualPaymentSummary({
-        approved: Number($("#component-amount").value || 0),
-        adjustment: Number($("#component-adjustment").value || 0),
-        paymentSchedule: draftSchedule, payments: [],
-      }, Number($("#component-plan-year").value), currentBudget.year).cash;
-    $("#component-payment-fields").innerHTML = months.map((month, index) =>
-      `<div class="field"><label for="payment-${index}">${month} (€)</label><input id="payment-${index}" data-payment-month="${index}" type="number" min="0" step="0.01" value="${annual[index] || 0}" ${mode === "manuale" ? "required" : "readonly"}></div>`,
-    ).join("");
+      .map((year) => `<option value="${year}">${year}</option>`)
+      .join("");
+    $("#component-plan-year").value = String(
+      years.includes(selectedYear) ? selectedYear : currentBudget.year,
+    );
+    const annual =
+      mode === "manuale"
+        ? draftManualPayments
+        : annualPaymentSummary(
+            {
+              approved: Number($("#component-amount").value || 0),
+              adjustment: Number($("#component-adjustment").value || 0),
+              paymentSchedule: draftSchedule,
+              payments: [],
+            },
+            Number($("#component-plan-year").value),
+            currentBudget.year,
+          ).cash;
+    $("#component-payment-fields").innerHTML = months
+      .map(
+        (month, index) =>
+          `<div class="field"><label for="payment-${index}">${month} (€)</label><input id="payment-${index}" data-payment-month="${index}" type="number" min="0" step="0.01" value="${annual[index] || 0}" ${mode === "manuale" ? "required" : "readonly"}></div>`,
+      )
+      .join("");
     updateComponentPreview();
   }
 
@@ -761,16 +931,20 @@ import {
     $("#component-interest").disabled = mode !== "finanziamento";
     $("#component-first-due").required = automatic;
     $("#component-installments").required = automatic;
-    $("#component-plan-help").textContent = mode === "finanziamento"
-      ? "La macchina entra nel budget alla data investimento. I mesi qui sotto mostrano i rimborsi alla banca: capitale e interessi sono separati nel piano; gli interessi non aumentano il CAPEX. Il pagamento al fornitore è previsto alla data investimento."
-      : mode === "fornitore"
-        ? "I mesi mostrano le rate pagate al fornitore. La somma del capitale di tutti gli anni deve coincidere con il CAPEX aggiornato."
-        : "Inserisci gli importi nei dodici mesi. La loro somma deve coincidere con il CAPEX aggiornato.";
-    renderComponentPaymentFields(Number($("#component-plan-year").value || currentBudget.year));
+    $("#component-plan-help").textContent =
+      mode === "finanziamento"
+        ? "La macchina entra nel budget alla data investimento. I mesi qui sotto mostrano i rimborsi alla banca: capitale e interessi sono separati nel piano; gli interessi non aumentano il CAPEX. Il pagamento al fornitore è previsto alla data investimento."
+        : mode === "fornitore"
+          ? "I mesi mostrano le rate pagate al fornitore. La somma del capitale di tutti gli anni deve coincidere con il CAPEX aggiornato."
+          : "Inserisci gli importi nei dodici mesi. La loro somma deve coincidere con il CAPEX aggiornato.";
+    renderComponentPaymentFields(
+      Number($("#component-plan-year").value || currentBudget.year),
+    );
   }
 
   function generateComponentPlan() {
-    const amount = Number($("#component-amount").value || 0) +
+    const amount =
+      Number($("#component-amount").value || 0) +
       Number($("#component-adjustment").value || 0);
     try {
       draftSchedule = generateInstallments({
@@ -788,7 +962,9 @@ import {
     }
     planDirty = false;
     $("#component-first-due").setCustomValidity("");
-    renderComponentPaymentFields(Number($("#component-plan-year").value || currentBudget.year));
+    renderComponentPaymentFields(
+      Number($("#component-plan-year").value || currentBudget.year),
+    );
   }
 
   function scaleMonthlyValues(values, targetCents) {
@@ -816,7 +992,10 @@ import {
     return nextCents.map((value) => value / 100);
   }
 
-  function openComponentModal(componentId = null, selectedYear = currentBudget.year) {
+  function openComponentModal(
+    componentId = null,
+    selectedYear = currentBudget.year,
+  ) {
     const projects =
       analysisScope === "budget" ? currentBudget.children : [currentChild];
     const component = componentId
@@ -851,19 +1030,27 @@ import {
     $("#component-source").value = component?.source || "";
     $("#component-life").value = component?.life || "";
     $("#component-state").value = component?.state || "Pianificato";
-    $("#component-purchase-date").value = component?.purchaseDate || `${currentBudget.year}-01-01`;
-    $("#component-service-date").value = component?.inServiceDate || (component ? "" : `${currentBudget.year}-01-01`);
+    $("#component-purchase-date").value =
+      component?.purchaseDate || `${currentBudget.year}-01-01`;
+    $("#component-service-date").value =
+      component?.inServiceDate ||
+      (component ? "" : `${currentBudget.year}-01-01`);
     $("#component-amount").value = component?.approved ?? "";
     $("#component-adjustment").value = component?.adjustment || 0;
     $("#component-depreciation").value = component?.depreciation ?? 0;
-    $("#component-payment-mode").value = component?.paymentMode || (component ? "manuale" : "fornitore");
-    $("#component-first-due").value = component?.firstDueDate || `${currentBudget.year}-01-01`;
+    $("#component-payment-mode").value =
+      component?.paymentMode || (component ? "manuale" : "fornitore");
+    $("#component-first-due").value =
+      component?.firstDueDate || `${currentBudget.year}-01-01`;
     $("#component-installments").value = component?.installments || 120;
     $("#component-interval").value = component?.intervalMonths || 1;
     $("#component-interest").value = component?.annualRate || 0;
-    draftSchedule = Array.isArray(component?.paymentSchedule) ? clone(component.paymentSchedule) : [];
+    draftSchedule = Array.isArray(component?.paymentSchedule)
+      ? clone(component.paymentSchedule)
+      : [];
     draftManualPayments = normalizePayments(component?.payments);
-    planDirty = $("#component-payment-mode").value !== "manuale" && !draftSchedule.length;
+    planDirty =
+      $("#component-payment-mode").value !== "manuale" && !draftSchedule.length;
     $("#component-amount").setCustomValidity("");
     $("#component-description").setCustomValidity("");
     $("#component-account").setCustomValidity("");
@@ -935,10 +1122,18 @@ import {
       return;
     }
     const updatedCents = Math.round((amount + adjustment) * 100);
-    const plannedPrincipalCents = mode === "manuale"
-      ? draftManualPayments.reduce((sum, value) => sum + Math.round(value * 100), 0)
-      : scheduleTotals(draftSchedule).principal;
-    if (updatedCents <= 0 || planDirty || plannedPrincipalCents !== updatedCents) {
+    const plannedPrincipalCents =
+      mode === "manuale"
+        ? draftManualPayments.reduce(
+            (sum, value) => sum + Math.round(value * 100),
+            0,
+          )
+        : scheduleTotals(draftSchedule).principal;
+    if (
+      updatedCents <= 0 ||
+      planDirty ||
+      plannedPrincipalCents !== updatedCents
+    ) {
       $("#component-amount").setCustomValidity(
         mode === "manuale"
           ? "La somma dei dodici mesi deve coincidere con il CAPEX aggiornato."
@@ -947,10 +1142,19 @@ import {
       $("#component-amount").reportValidity();
       return;
     }
-    const payments = mode === "manuale" ? draftManualPayments.slice() :
-      annualPaymentSummary({
-        approved: amount, adjustment, paymentSchedule: draftSchedule, payments: [],
-      }, currentBudget.year, currentBudget.year).cash;
+    const payments =
+      mode === "manuale"
+        ? draftManualPayments.slice()
+        : annualPaymentSummary(
+            {
+              approved: amount,
+              adjustment,
+              paymentSchedule: draftSchedule,
+              payments: [],
+            },
+            currentBudget.year,
+            currentBudget.year,
+          ).cash;
     const row = linkedRow || { id: `ic${crypto.randomUUID()}` };
     const approvedEconomicCents = linkedRow
       ? Array.from({ length: 12 }, (_, month) =>
@@ -968,8 +1172,10 @@ import {
     const values = linkedRow
       ? scaleMonthlyValues(linkedRow.values, targetBaseCents)
       : Array.from({ length: 12 }, (_, month) =>
-        month === Number(purchaseDate.slice(5, 7)) - 1 ? targetBaseCents / 100 : 0,
-      );
+          month === Number(purchaseDate.slice(5, 7)) - 1
+            ? targetBaseCents / 100
+            : 0,
+        );
     Object.assign(row, {
       code: project.code,
       description: project.name,
@@ -994,9 +1200,12 @@ import {
       inServiceDate: $("#component-service-date").value,
       paymentMode: mode,
       firstDueDate: mode === "manuale" ? null : $("#component-first-due").value,
-      installments: mode === "manuale" ? null : Number($("#component-installments").value),
-      intervalMonths: mode === "manuale" ? null : Number($("#component-interval").value),
-      annualRate: mode === "finanziamento" ? Number($("#component-interest").value) : 0,
+      installments:
+        mode === "manuale" ? null : Number($("#component-installments").value),
+      intervalMonths:
+        mode === "manuale" ? null : Number($("#component-interval").value),
+      annualRate:
+        mode === "finanziamento" ? Number($("#component-interest").value) : 0,
       paymentSchedule: mode === "manuale" ? [] : clone(draftSchedule),
       payments,
       approved: amount,
@@ -1013,53 +1222,28 @@ import {
     );
   }
 
-  function openEdit(type, budgetId, childId) {
+  function openEdit(type, budgetId) {
     const budget = budgets.find((b) => b.id === budgetId);
-    const child = childId
-      ? budget.children.find((c) => c.id === childId)
-      : null;
-    const childForm = Boolean(child) || type === "new-child";
-    editing = { type, budgetId, childId };
+    editing = { type, budgetId };
     $("#edit-modal-title").textContent =
-      type === "new-child"
-        ? `Aggiungi voce a ${budget.name}`
-        : type === "new"
-        ? "Crea nuovo budget"
-        : child
-          ? `Modifica livello ${child.code}`
-          : `Modifica intestazione ${budget.name}`;
-    $("#edit-modal-body").innerHTML = childForm
-      ? `
-      <div class="field"><label for="edit-code">Codice livello</label><input id="edit-code" name="code" value="${escapeHtml(child?.code || "")}" required></div>
-      <div class="field"><label for="edit-child-state">Stato</label><select id="edit-child-state" name="state"><option ${!child || child.state === "Bozza" ? "selected" : ""}>Bozza</option><option ${child?.state === "Creato" ? "selected" : ""}>Creato</option><option ${child?.state === "Completato" ? "selected" : ""}>Completato</option></select></div>
-      <div class="field full"><label for="edit-child-name">Descrizione voce / livello</label><input id="edit-child-name" name="name" value="${escapeHtml(child?.name || "")}" required></div>
-    `
-      : `
+      type === "new" ? "Crea nuovo budget" : `Modifica budget ${budget.name}`;
+    const associatedStructure = budget?.associatedStructure || "";
+    $("#edit-modal-body").innerHTML = `
       <div class="field"><label for="edit-year">Anno</label><input id="edit-year" name="year" type="number" value="${budget?.year || 2027}" required></div>
       <div class="field"><label for="edit-name">Nome budget</label><input id="edit-name" name="name" value="${escapeHtml(budget?.name || "NUOVO BUDGET")}" required></div>
       <div class="field"><label for="edit-version">Versione</label><input id="edit-version" name="version" type="number" value="${budget?.version || 1}" required></div>
       <div class="field"><label for="edit-revision">Revisione</label><input id="edit-revision" name="revision" type="number" value="${budget?.revision || 0}" required></div>
       <div class="field"><label for="edit-frequency">Periodicità</label><select id="edit-frequency" name="frequency"><option>Annuale</option><option>Mensile</option><option>Trimestrale</option><option>Vita utile</option></select></div>
       <div class="field"><label for="edit-type">Tipo budget</label><select id="edit-type" name="budgetType"><option>Ordinario</option><option>Investimento</option></select></div>
-      <div class="field"><label for="edit-typology">Tipologia</label><select id="edit-typology" name="typology"><option>CDC</option><option>COMMESSA</option></select></div>
-      <div class="field"><label for="edit-state">Stato</label><select id="edit-state" name="state"><option>Bozza</option><option>Creato</option><option>Completato</option></select></div>
+      <div class="field full"><label for="edit-associated-structure">Struttura analitica associata</label><input id="edit-associated-structure" name="associatedStructure" value="${escapeHtml(associatedStructure)}" placeholder="Informazione libera"></div>
+      <div class="field"><label for="edit-state">Stato</label><select id="edit-state" name="state"><option>Attivo</option><option>Disattivo</option></select></div>
     `;
-    if (!childForm && budget) {
+    if (budget) {
       $("#edit-frequency").value = budget.frequency;
       $("#edit-type").value = budget.type;
-      $("#edit-typology").value = budget.typology;
       $("#edit-state").value = budget.state;
     }
-    $("#edit-form button[type='submit']").textContent =
-      type === "new-child" ? "Aggiungi riga" : "Salva modifiche";
-    if (childForm) {
-      $("#edit-code").addEventListener("input", (event) =>
-        event.target.setCustomValidity(""),
-      );
-      $("#edit-child-name").addEventListener("input", (event) =>
-        event.target.setCustomValidity(""),
-      );
-    }
+    $("#edit-form button[type='submit']").textContent = "Salva modifiche";
     $("#edit-modal").classList.add("open");
     $("#edit-modal").setAttribute("aria-hidden", "false");
   }
@@ -1068,6 +1252,45 @@ import {
     $("#edit-modal").classList.remove("open");
     $("#edit-modal").setAttribute("aria-hidden", "true");
     editing = null;
+  }
+
+  function copyBudget(budgetId) {
+    const sourceIndex = budgets.findIndex((budget) => budget.id === budgetId);
+    if (sourceIndex < 0) return;
+    const source = budgets[sourceIndex];
+    const copied = copyBudgetWithNextVersion(
+      budgets,
+      source,
+      () => crypto.randomUUID(),
+    );
+    budgets.splice(sourceIndex + 1, 0, copied);
+    persist();
+    renderBudgets();
+    toast(`${source.name} copiato nella versione ${copied.version}`);
+  }
+
+  function deleteBudget(budgetId) {
+    const budget = budgets.find((item) => item.id === budgetId);
+    if (!budget) return;
+    if (budgets.length === 1) {
+      toast("Deve rimanere almeno un budget");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Eliminare ${budget.name}, versione ${budget.version}? L’operazione non può essere annullata.`,
+      )
+    )
+      return;
+    budgets = budgets.filter((item) => item.id !== budgetId);
+    if (currentBudget.id === budgetId) {
+      currentBudget = budgets[0];
+      currentChild = currentBudget.children[0];
+      analysisScope = "budget";
+    }
+    persist();
+    renderBudgets();
+    toast(`${budget.name}, versione ${budget.version}, eliminato`);
   }
 
   function adjustmentRows() {
@@ -1112,8 +1335,9 @@ import {
       `Budget attuale ${euro.format(current)} · Variazione ${amount >= 0 ? "+" : ""}${euro.format(amount)} · Nuovo budget ${euro.format(current + amount)}`;
   }
   function renderAdjustments() {
-    $("#adjustment-count").textContent = `(${adjustments.length})`;
-    $("#adjustment-list").innerHTML = adjustmentListHtml(adjustments);
+    const visible = adjustments.filter((item) => item.scope !== "planning" || item.budgetId === currentBudget.id);
+    $("#adjustment-count").textContent = `(${visible.length})`;
+    $("#adjustment-list").innerHTML = adjustmentListHtml(visible);
   }
   function openAdjustments(rowId, scope = "economic") {
     $("#adj-scope").value = scope;
@@ -1169,20 +1393,17 @@ import {
   }
   function openRedistribution(rowId) {
     redistributionRowId = rowId;
-    redistributionNature = currentNature;
-    const row = rowsForCurrent()[currentNature].find(
-      (item) => item.id === rowId,
-    );
+    const row = planningLevel(rowId);
+    if (!row) return;
     $("#redistribution-title").textContent =
-      `Redistribuzione importo · ${row?.voice || ""}`;
-    $("#dist-total").value = row
-      ? row.values.reduce((sum, value) => sum + value, 0)
-      : 0;
+      `Ripartisci · ${row.name}`;
+    $("#dist-total").value = row.months.reduce((sum, value) => sum + Number(value), 0).toFixed(2);
+    $("#dist-total").readOnly = true;
     $("#dist-total").setCustomValidity("");
     $("#dist-duration").value = 12;
     $("#dist-periodicity").value = "1";
     $("#dist-start").value = `${currentBudget.year}-01-01`;
-    $("#dist-type").value = currentNature;
+    $("#dist-type").closest(".field").hidden = true;
     renderDistributionSchedule();
     $("#redistribution-modal").classList.add("open");
     $("#redistribution-modal").setAttribute("aria-hidden", "false");
@@ -1193,45 +1414,33 @@ import {
     redistributionRowId = null;
   }
   function applyDistribution() {
-    const row = rowsForCurrent()[redistributionNature].find(
-      (item) => item.id === redistributionRowId,
-    );
+    const row = planningLevel(redistributionRowId);
     if (!row) return;
+    const duration = Number($("#dist-duration").value);
+    if (!Number.isInteger(duration) || duration < 1 || duration > 120 || $$("#distribution-rows tr").length !== duration) {
+      toast("Aggiorna la durata: il numero di scadenze non coincide");
+      return;
+    }
     const yearValues = Array(12).fill(0);
+    let outsideYear = false;
+    let invalidAmount = false;
     $$("#distribution-rows tr").forEach((tr) => {
       const date = new Date(
         `${tr.querySelector("[data-distribution-date]").dataset.distributionDate}T00:00:00`,
       );
-      if (date.getFullYear() === currentBudget.year)
-        yearValues[date.getMonth()] += Number(
-          tr.querySelector(".distribution-amount").value || 0,
-        );
+      const rawAmount = tr.querySelector(".distribution-amount").value;
+      const amount = Number(rawAmount);
+      if (rawAmount === "" || !Number.isFinite(amount) || amount < 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 1e-7) invalidAmount = true;
+      if (date.getFullYear() !== currentBudget.year) outsideYear = true;
+      else yearValues[date.getMonth()] += amount;
     });
-    const linkedComponent =
-      currentBudget.type === "Investimento" && redistributionNature === "cost"
-        ? capexForCurrent().find(
-            (component) => component.budgetRowId === row.id,
-          )
-        : null;
-    if (linkedComponent) {
-      const plannedCents = Math.round(
-        yearValues.reduce((sum, value) => sum + value, 0) * 100,
-      );
-      const economicAdjustmentCents = Array.from({ length: 12 }, (_, month) =>
-        getApprovedAdjustment(row.id, month),
-      ).reduce((sum, value) => sum + Math.round(value * 100), 0);
-      const capexCents = Math.round(
-        (linkedComponent.approved + linkedComponent.adjustment) * 100,
-      );
-      if (plannedCents + economicAdjustmentCents !== capexCents) {
-        $("#dist-total").setCustomValidity(
-          "Per questa voce il totale annuo del budget deve coincidere con il CAPEX aggiornato della tabella 4.",
-        );
-        $("#dist-total").reportValidity();
-        return;
-      }
+    const originalCents = Math.round(row.months.reduce((sum, value) => sum + Number(value), 0) * 100);
+    const distributedCents = Math.round(yearValues.reduce((sum, value) => sum + value, 0) * 100);
+    if (invalidAmount || outsideYear || originalCents !== distributedCents) {
+      toast(invalidAmount ? "Inserisci importi validi e non negativi" : outsideYear ? `Tutte le scadenze devono essere nel ${currentBudget.year}` : "La ripartizione deve conservare il totale annuale");
+      return;
     }
-    row.values = yearValues.map((value) => Math.round(value * 100) / 100);
+    row.months = yearValues.map((value) => Math.round(value * 100) / 100);
     persist();
     renderAnalysis();
     closeRedistribution();
@@ -1239,22 +1448,14 @@ import {
   }
 
   $("#budget-list").addEventListener("click", (event) => {
-    const addLevel = event.target.closest("[data-add-level]");
     const editBudget = event.target.closest("[data-edit-budget]");
-    const editChild = event.target.closest("[data-edit-child]");
+    const copy = event.target.closest("[data-copy-budget]");
     const openBudget = event.target.closest("[data-open-budget]");
-    const openChild = event.target.closest("[data-open-child]");
-    if (addLevel) openEdit("new-child", addLevel.dataset.addLevel);
+    const remove = event.target.closest("[data-delete-budget]");
     if (editBudget) openEdit("budget", editBudget.dataset.editBudget);
-    if (editChild) {
-      const [b, c] = editChild.dataset.editChild.split("|");
-      openEdit("child", b, c);
-    }
+    if (copy) copyBudget(copy.dataset.copyBudget);
     if (openBudget) openAnalysis(openBudget.dataset.openBudget);
-    if (openChild) {
-      const [b, c] = openChild.dataset.openChild.split("|");
-      openAnalysis(b, c);
-    }
+    if (remove) deleteBudget(remove.dataset.deleteBudget);
   });
   $("#apply-filters").addEventListener("click", () => {
     renderBudgets();
@@ -1264,12 +1465,31 @@ import {
   $("#level-search").addEventListener("input", renderAnalysis);
   $("#voice-search").addEventListener("input", renderAnalysis);
   $("#monthly-search").addEventListener("input", renderMonthly);
+  $("#toggle-monthly-adjustments").addEventListener("click", () => {
+    monthlyAdjustmentsVisible = !monthlyAdjustmentsVisible;
+    $("#toggle-monthly-adjustments").setAttribute("aria-expanded", String(monthlyAdjustmentsVisible));
+    renderMonthly();
+  });
   $("#capex-search").addEventListener("input", renderCapex);
   $("#create-budget").addEventListener("click", () => openEdit("new"));
   $("#back-management").addEventListener("click", () => showPage("management"));
   $("#save-analysis").addEventListener("click", () => {
+    const validation = planningValidation(currentBudget.planning);
+    if (!validation.valid) {
+      if (validation.allocationPercentError) {
+        const difference = Math.abs(100 - validation.allocationPercent);
+        toast(`Per salvare, le percentuali di Livello 1 devono totalizzare 100%. Da sistemare: ${difference.toFixed(2)} punti.`);
+      } else if (validation.level2AllocationErrors.length) {
+        toast("Le percentuali sul totale dei figli devono quadrarsi con la quota del rispettivo padre.");
+      } else if (validation.level2TotalPercentError) {
+        toast(`Le percentuali sul totale del Livello 2 devono totalizzare 100%. Attuale: ${validation.level2TotalPercent.toFixed(2)}%.`);
+      } else {
+        toast("Correggi le percentuali dei figli e i mesi evidenziati in rosso prima di salvare");
+      }
+      return;
+    }
     persist();
-    toast("Analisi salvata nel mockup");
+    toast("Pianificazione budget salvata");
   });
   $("#analysis-type").addEventListener("change", (event) => {
     const next = budgets.find((budget) => budget.type === event.target.value);
@@ -1282,17 +1502,230 @@ import {
   $("#analysis-budget-field").addEventListener("change", (event) =>
     openAnalysis(event.target.value),
   );
-  $("#level-table").addEventListener("change", (event) => {
-    const input = event.target.closest("[data-level-source]");
-    if (!input || currentBudget.type !== "Investimento") return;
-    const level = currentBudget.children.find(
-      (child) => child.id === input.dataset.levelSource,
+  const toggleSelection = (selection, id) => {
+    const next = new Set(selection);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  };
+  let planningModalContext = null;
+  const planningModal = $("#planning-modal");
+  const closePlanningModal = () => {
+    planningModal.classList.remove("open");
+    planningModal.setAttribute("aria-hidden", "true");
+    planningModalContext = null;
+  };
+  const showPlanningModal = (context, title, fields) => {
+    planningModalContext = context;
+    $("#planning-modal-title").textContent = title;
+    $("#planning-modal-body").innerHTML = fields;
+    planningModal.classList.add("open");
+    planningModal.setAttribute("aria-hidden", "false");
+    $("#planning-modal-body").querySelector("input,select")?.focus();
+  };
+  const openPlanningForm = (kind, id = null) => {
+    const planning = currentBudget.planning;
+    const isNew = !id;
+    const field = (label, name, value, type = "number", attrs = "") => `<div class="field"><label for="planning-${name}">${label}</label><input id="planning-${name}" name="${name}" type="${type}" value="${escapeHtml(value)}" ${attrs}></div>`;
+    const select = (label, name, options) => `<div class="field full"><label for="planning-${name}">${label}</label><select id="planning-${name}" name="${name}" required>${options}</select></div>`;
+    const options = (items, selected = "") => items.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === selected ? "selected" : ""}>${escapeHtml(item.code)} · ${escapeHtml(item.name)}</option>`).join("");
+    const monthlyLevels = planning.mode === "single-level" ? planning.level1 : planning.level2;
+    let fields = "";
+    if (kind === "l1") {
+      const item = id ? planning.level1.find((entry) => entry.id === id) : null;
+      const available = planning.catalog.level1.filter((entry) => !planning.level1.some((level) => normalizeCode(level.code) === normalizeCode(entry.code)));
+      fields = isNew ? select("Struttura analitica", "catalog-id", options(available)) + field("Budget (€)", "budget", "0", "number", 'min="0" step="0.01" required') : field("Budget (€)", "budget", item.budget || 0, "number", 'min="0" step="0.01" required');
+      showPlanningModal({ kind, id, isNew }, isNew ? "Aggiungi Livello 1" : `Modifica ${item.name}`, fields);
+    } else if (kind === "l2") {
+      const item = id ? planning.level2.find((entry) => entry.id === id) : null;
+      const available = planning.catalog.level2.filter((entry) => !planning.level2.some((level) => normalizeCode(level.code) === normalizeCode(entry.code)) && planning.level1.some((parent) => normalizeCode(parent.code) === normalizeCode(entry.parentCode)));
+      const parents = planning.level1;
+      const parentId = item?.parentId || (selectedLevel1Ids.size === 1 ? [...selectedLevel1Ids][0] : "");
+      fields = (isNew ? select("Elemento struttura", "catalog-id", options(available)) : `<div class="field full"><label>Elemento</label><div class="readonly-value">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</div></div>`) + `<div class="field full"><label>Appartiene a</label><div class="readonly-value" id="planning-parent-label">${escapeHtml(parents.find((parent) => parent.id === parentId)?.code || "Seleziona un elemento")}</div><input type="hidden" name="parent-id" id="planning-parent-id" value="${escapeHtml(parentId)}"></div>`;
+      showPlanningModal({ kind, id, isNew }, isNew ? "Aggiungi Livello 2" : `Modifica ${item.name}`, fields);
+      const catalogSelect = $("#planning-catalog-id");
+      catalogSelect?.addEventListener("change", () => {
+        const selectedItem = available.find((entry) => entry.id === catalogSelect.value);
+        const parent = planning.level1.find((entry) => normalizeCode(entry.code) === normalizeCode(selectedItem?.parentCode));
+        $("#planning-parent-id").value = parent?.id || "";
+        $("#planning-parent-label").textContent = parent ? `${parent.code} · ${parent.name}` : "Struttura padre non presente nel budget";
+      });
+    } else {
+      const item = monthlyLevels.find((entry) => entry.id === id);
+      const choices = monthlyLevels.filter((entry) => entry.monthlyActive === false);
+      const monthFields = months.map((name, index) => field(name, `month-${index}`, item?.months?.[index] || 0, "number", 'min="0" step="0.01"')).join("");
+      fields = (isNew ? select("Elemento da pianificare", "level-id", options(choices, selectedMonthlyIds.size === 1 ? [...selectedMonthlyIds][0] : "")) : `<div class="field full"><label>Elemento</label><div class="readonly-value">${escapeHtml(item.code)} · ${escapeHtml(item.name)}</div></div>`) + `<div class="planning-month-fields">${monthFields}</div>`;
+      showPlanningModal({ kind, id, isNew }, isNew ? "Aggiungi pianificazione mensile" : `Modifica ${item.name}`, fields);
+    }
+  };
+  $("#add-l1").addEventListener("click", () => openPlanningForm("l1"));
+  $("#add-l2").addEventListener("click", () => openPlanningForm("l2"));
+  $("#add-monthly").addEventListener("click", () => openPlanningForm("monthly"));
+  $("#close-planning-modal").addEventListener("click", closePlanningModal);
+  $("#cancel-planning-modal").addEventListener("click", closePlanningModal);
+  planningModal.addEventListener("click", (event) => { if (event.target === planningModal) closePlanningModal(); });
+  $("#planning-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const context = planningModalContext;
+    if (!context) return;
+    const data = new FormData(event.currentTarget);
+    const planning = currentBudget.planning;
+    if (context.kind === "l1") {
+      if (context.isNew) {
+        const item = planning.catalog.level1.find((entry) => entry.id === data.get("catalog-id"));
+        if (!item) return;
+        const amount = Number(data.get("budget") || 0);
+        const added = { ...clone(item), id: `l1-${currentBudget.id}-${normalizeCode(item.code)}`, budget: amount, totalPercent: planningBaseTotal(planning) > 0 ? amount / planningBaseTotal(planning) * 100 : 0, months: Array(12).fill(0), monthlyActive: false };
+        planning.level1.push(added); selectedLevel1Ids = new Set([added.id]); selectedLevel2Ids = new Set(); selectedMonthlyIds = new Set();
+      } else {
+        const level = planning.level1.find((entry) => entry.id === context.id);
+        if (level) level.budget = Math.max(0, Number(data.get("budget") || 0));
+      }
+    } else if (context.kind === "l2") {
+      if (context.isNew) {
+        const item = planning.catalog.level2.find((entry) => entry.id === data.get("catalog-id"));
+        const parent = planning.level1.find((entry) => entry.id === data.get("parent-id"));
+        if (!item || !parent || normalizeCode(parent.code) !== normalizeCode(item.parentCode)) { toast("L'elemento selezionato non appartiene alla struttura scelta"); return; }
+        const added = { ...clone(item), id: `l2-${currentBudget.id}-${normalizeCode(item.code)}`, parentId: parent.id, parentCode: parent.code, totalPercent: 0, months: Array(12).fill(0), monthlyActive: false };
+        planning.level2.push(added); selectedLevel1Ids = new Set([parent.id]); selectedLevel2Ids = new Set([added.id]); selectedMonthlyIds = new Set();
+      } else {
+        const level = planning.level2.find((entry) => entry.id === context.id);
+        const parent = planning.level1.find((entry) => entry.id === data.get("parent-id"));
+        if (level && parent && normalizeCode(parent.code) === normalizeCode(level.parentCode)) { level.parentId = parent.id; level.parentCode = parent.code; }
+      }
+    } else {
+      const levels = planning.mode === "single-level" ? planning.level1 : planning.level2;
+      const level = levels.find((entry) => entry.id === (context.isNew ? data.get("level-id") : context.id));
+      if (level) { level.monthlyActive = true; level.months = months.map((_, index) => Math.max(0, Number(data.get(`month-${index}`) || 0))); selectedMonthlyIds = new Set([level.id]); if (planning.mode === "single-level") selectedLevel1Ids = new Set([level.id]); else { selectedLevel2Ids = new Set([level.id]); const parent = planning.level1.find((entry) => entry.id === level.parentId); if (parent) selectedLevel1Ids = new Set([parent.id]); } }
+    }
+    closePlanningModal(); renderAnalysis(); persist();
+  });
+  [$("#level-table"), $("#voice-table"), $("#monthly-table")].forEach((table) => table.addEventListener("click", (event) => {
+    const editButton = event.target.closest("[data-planning-edit]");
+    if (editButton) { event.stopPropagation(); openPlanningForm(editButton.dataset.planningEdit, editButton.dataset.planningId); return; }
+    const deleteButton = event.target.closest("[data-planning-delete]");
+    if (deleteButton) {
+      event.stopPropagation();
+      const kind = deleteButton.dataset.planningDelete; const id = deleteButton.dataset.planningId; const planning = currentBudget.planning;
+      if (kind === "l1" && planning.level2.some((level) => level.parentId === id)) { toast("Elimina prima gli elementi di Livello 2 collegati"); return; }
+      if (!window.confirm("Vuoi eliminare questo elemento dal budget?")) return;
+      if (kind === "l1") planning.level1 = planning.level1.filter((level) => level.id !== id);
+      if (kind === "l2") planning.level2 = planning.level2.filter((level) => level.id !== id);
+      if (kind === "monthly") { const levels = planning.mode === "single-level" ? planning.level1 : planning.level2; const level = levels.find((entry) => entry.id === id); if (level) { level.monthlyActive = false; level.months = Array(12).fill(0); } }
+      selectedLevel1Ids.delete(id); selectedLevel2Ids.delete(id); selectedMonthlyIds.delete(id); renderAnalysis(); persist();
+    }
+  }));
+  const updateLevel1Budget = (event) => {
+    const input = event.target.closest("[data-l1-budget]");
+    if (!input) return;
+    const level = currentBudget.planning.level1.find(
+      (item) => item.id === input.dataset.l1Budget,
     );
     if (!level) return;
-    level.fundingSource = input.value.trim() || "Da definire";
-    input.value = level.fundingSource;
+    level.budget = Math.max(0, Number(input.value || 0));
+    const baseTotal = planningBaseTotal(currentBudget.planning);
+    level.totalPercent = baseTotal > 0 ? level.budget / baseTotal * 100 : 0;
+  };
+  const resizeMonthlyDistribution = (level, targetAmount) => {
+    if (level.monthlyActive === false) return;
+    const current = Array.from({ length: 12 }, (_, index) => Number(level.months?.[index] || 0));
+    const currentTotal = current.reduce((sum, value) => sum + value, 0);
+    const targetCents = Math.round(Math.max(0, Number(targetAmount || 0)) * 100);
+    let allocatedCents = 0;
+    level.months = current.map((value, index) => {
+      const cents = index === current.length - 1
+        ? targetCents - allocatedCents
+        : currentTotal > 0
+          ? Math.round(targetCents * value / currentTotal)
+          : Math.floor(targetCents / current.length);
+      allocatedCents += cents;
+      return cents / 100;
+    });
+  };
+  const resizeDescendantMonths = (planning) => {
+    if (planning.mode === "single-level") {
+      planning.level1.forEach((level) => resizeMonthlyDistribution(level, level.budget));
+      return;
+    }
+    planning.level2.forEach((level) => {
+      resizeMonthlyDistribution(
+        level,
+        planningBaseTotal(planning) * Number(level.totalPercent || 0) / 100,
+      );
+    });
+  };
+  const updateLevel1Percent = (event) => {
+    const input = event.target.closest("[data-l1-percent]");
+    if (!input) return;
+    const planning = currentBudget.planning;
+    const selected = planning.level1.find((item) => item.id === input.dataset.l1Percent);
+    if (!selected) return;
+    const baseTotal = planningBaseTotal(planning);
+    if (baseTotal <= 0) { toast("Inserisci prima un budget complessivo di riferimento"); return; }
+    const enteredPercent = Number(input.value || 0);
+    const percent = Math.min(100, Math.max(0, enteredPercent));
+    if (enteredPercent > 100 || enteredPercent < 0) {
+      toast("La percentuale deve essere compresa tra 0% e 100%. Ho applicato il limite massimo.");
+    }
+    input.value = percent.toFixed(2);
+    selected.totalPercent = percent;
+    selected.budget = Math.round((baseTotal * percent / 100) * 100) / 100;
+  };
+  $("#level-table").addEventListener("change", (event) => {
+    if (event.target.closest("[data-l1-budget]")) updateLevel1Budget(event);
+    if (event.target.closest("[data-l1-percent]")) updateLevel1Percent(event);
+    resizeDescendantMonths(currentBudget.planning);
+    renderAnalysis();
     persist();
-    toast("Fonte di finanziamento salvata in SQLite");
+  });
+  $("#level-table").addEventListener("click", (event) => {
+    if (event.target.closest("input,button")) return;
+    const row = event.target.closest("[data-select-l1]");
+    if (!row) return;
+    selectedLevel1Ids = toggleSelection(
+      selectedLevel1Ids,
+      row.dataset.selectL1,
+    );
+    selectedLevel2Ids = new Set();
+    selectedMonthlyIds =
+      currentBudget.planning.mode === "single-level"
+        ? new Set(selectedLevel1Ids)
+        : new Set();
+    editingLevel1Ids = new Set();
+    editingLevel2Ids = new Set();
+    editingMonthlyIds = new Set();
+    renderAnalysis();
+  });
+  const updateLevel2TotalPercent = (event) => {
+    const input = event.target.closest("[data-l2-total-percent]");
+    if (!input) return;
+    const planning = currentBudget.planning;
+    const level = planning.level2.find((item) => item.id === input.dataset.l2TotalPercent);
+    if (!level) return;
+    const entered = Number(input.value || 0);
+    const percent = Math.min(100, Math.max(0, entered));
+    if (entered > 100 || entered < 0) toast("La percentuale deve essere compresa tra 0% e 100%.");
+    input.value = percent.toFixed(2);
+    level.totalPercent = percent;
+  };
+  $("#voice-table").addEventListener("change", (event) => {
+    if (event.target.closest("[data-l2-total-percent]")) updateLevel2TotalPercent(event);
+    resizeDescendantMonths(currentBudget.planning);
+    renderAnalysis();
+    persist();
+  });
+  $("#voice-table").addEventListener("click", (event) => {
+    if (event.target.closest("input,button")) return;
+    const row = event.target.closest("[data-select-l2]");
+    if (!row) return;
+    selectedLevel2Ids = toggleSelection(
+      selectedLevel2Ids,
+      row.dataset.selectL2,
+    );
+    selectedMonthlyIds = new Set(selectedLevel2Ids);
+    editingLevel2Ids = new Set();
+    editingMonthlyIds = new Set();
+    renderAnalysis();
   });
 
   $$("[data-nature-tab]").forEach((button) =>
@@ -1302,10 +1735,102 @@ import {
     }),
   );
   $("#monthly-table").addEventListener("click", (event) => {
-    const adjustment = event.target.closest("[data-adjust-row]");
+    if (event.target.closest("input")) return;
+    const row = event.target.closest("[data-select-monthly]");
     const distribution = event.target.closest("[data-distribute-row]");
-    if (adjustment) openAdjustments(adjustment.dataset.adjustRow);
+    if (row && !event.target.closest("button")) {
+      selectedMonthlyIds = toggleSelection(
+        selectedMonthlyIds,
+        row.dataset.selectMonthly,
+      );
+      editingMonthlyIds = new Set();
+      renderAnalysis();
+    }
     if (distribution) openRedistribution(distribution.dataset.distributeRow);
+  });
+  const updateMonthlyValue = (event) => {
+    const input = event.target.closest("[data-plan-month]");
+    if (!input) return;
+    const planning = currentBudget.planning;
+    const levels =
+      planning.mode === "single-level" ? planning.level1 : planning.level2;
+    const level = levels.find((item) => item.id === input.dataset.planLevel);
+    if (!level) return;
+    level.months[Number(input.dataset.planMonth)] = Math.max(
+      0,
+      Number(input.value || 0),
+    );
+  };
+  function applyInlineAdjustment(levelId, month, rawValue) {
+    const level = planningLevel(levelId);
+    if (!level) return;
+    const value = Number(rawValue);
+    const previous = planningAdjustment(level.id, month).approved;
+    if (rawValue === "" || !Number.isFinite(value) || Math.abs(Math.round(value * 100) - value * 100) > 1e-7 || Math.round((Number(level.months[month]) + value) * 100) < 0) {
+      toast("Rettifica non valida: usa due decimali e mantieni il budget del mese non negativo");
+      renderMonthly();
+      return;
+    }
+    const deltaCents = Math.round(value * 100) - Math.round(previous * 100);
+    if (deltaCents === 0) return;
+    adjustments.unshift({
+      id: `RET-${Date.now()}-${level.id}-${month}`,
+      budgetId: currentBudget.id,
+      scope: "planning",
+      nature: "cost",
+      rowId: level.id,
+      rowLabel: `${level.code} · ${level.name}`,
+      month,
+      amount: deltaCents / 100,
+      reason: "Rettifica diretta dalla tabella mensile",
+      attachment: "",
+      status: "Approvata",
+    });
+    persist();
+    renderAdjustments();
+  }
+  $("#monthly-table").addEventListener("input", (event) => {
+    const input = event.target.closest("[data-adjust-month]");
+    if (!input) return;
+    const level = planningLevel(input.dataset.adjustLevel);
+    const amount = Number(input.value);
+    if (!level || input.value === "" || !Number.isFinite(amount)) return;
+    input.closest("td").querySelector("small").textContent =
+      `Budget mese ${euro.format(Number(level.months[Number(input.dataset.adjustMonth)]) + amount)}`;
+    const row = input.closest("tr");
+    const total = [...row.querySelectorAll("[data-adjust-month]")].reduce((sum, cell) => sum + Number(cell.value || 0), 0);
+    const base = level.months.reduce((sum, value) => sum + Number(value), 0);
+    row.querySelector("[data-monthly-adjustment]").textContent = euro.format(total);
+    row.querySelector("[data-monthly-updated]").textContent = euro.format(base + total);
+    const foot = $("#monthly-foot tr");
+    const month = Number(input.dataset.adjustMonth);
+    const monthTotal = [...$("#monthly-table").querySelectorAll(`[data-adjust-month="${month}"]`)].reduce((sum, cell) => sum + Number(cell.value || 0), 0);
+    foot.children[2 + month * 2].textContent = euro.format(monthTotal);
+    const allAdjustments = [...$("#monthly-table").querySelectorAll("[data-adjust-month]")].reduce((sum, cell) => sum + Number(cell.value || 0), 0);
+    const visibleBase = [...$("#monthly-table").querySelectorAll("[data-select-monthly]")].reduce((sum, tr) => sum + planningLevel(tr.dataset.selectMonthly).months.reduce((total, value) => total + Number(value), 0), 0);
+    foot.children[26].textContent = euro.format(allAdjustments);
+    foot.children[27].textContent = euro.format(visibleBase + allAdjustments);
+    const key = `${currentBudget.id}:${level.id}:${month}`;
+    clearTimeout(adjustmentSaveTimers.get(key));
+    adjustmentSaveTimers.set(key, setTimeout(() => {
+      adjustmentSaveTimers.delete(key);
+      applyInlineAdjustment(level.id, month, input.value);
+    }, 500));
+  });
+  $("#monthly-table").addEventListener("change", (event) => {
+    const adjustmentInput = event.target.closest("[data-adjust-month]");
+    if (adjustmentInput) {
+      const key = `${currentBudget.id}:${adjustmentInput.dataset.adjustLevel}:${adjustmentInput.dataset.adjustMonth}`;
+      clearTimeout(adjustmentSaveTimers.get(key));
+      adjustmentSaveTimers.delete(key);
+      const month = Number(adjustmentInput.dataset.adjustMonth);
+      applyInlineAdjustment(adjustmentInput.dataset.adjustLevel, month, adjustmentInput.value);
+      return;
+    }
+    if (!event.target.closest("[data-plan-month]")) return;
+    updateMonthlyValue(event);
+    renderAnalysis();
+    persist();
   });
   $("#open-adjustments").addEventListener("click", () => openAdjustments());
   $("#capex-adjustment").addEventListener("click", () =>
@@ -1361,49 +1886,7 @@ import {
   $("#edit-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
-    if (editing.type === "child") {
-      const budget = budgets.find((b) => b.id === editing.budgetId);
-      const child = budget.children.find((c) => c.id === editing.childId);
-      Object.assign(child, {
-        code: data.code,
-        name: data.name,
-        state: data.state,
-      });
-    } else if (editing.type === "new-child") {
-      const budget = budgets.find((b) => b.id === editing.budgetId);
-      const code = data.code.trim();
-      const name = data.name.trim();
-      if (!normalizeCode(code)) {
-        $("#edit-code").setCustomValidity("Inserisci un codice valido.");
-        $("#edit-code").reportValidity();
-        return;
-      }
-      if (!name) {
-        $("#edit-child-name").setCustomValidity("Inserisci una descrizione.");
-        $("#edit-child-name").reportValidity();
-        return;
-      }
-      if (
-        budget.children.some(
-          (child) => normalizeCode(child.code) === normalizeCode(code),
-        )
-      ) {
-        $("#edit-code").setCustomValidity(
-          "Questo codice è già presente nel budget.",
-        );
-        $("#edit-code").reportValidity();
-        return;
-      }
-      budget.children.push({
-        id: `level-${crypto.randomUUID()}`,
-        code,
-        name,
-        state: data.state,
-        ...(budget.type === "Investimento"
-          ? { fundingSource: "Da definire" }
-          : {}),
-      });
-    } else if (editing.type === "new") {
+    if (editing.type === "new") {
       const id = `bdg${Date.now()}`;
       budgets.push({
         id,
@@ -1412,7 +1895,7 @@ import {
         version: Number(data.version),
         frequency: data.frequency,
         revision: Number(data.revision),
-        typology: data.typology,
+        associatedStructure: data.associatedStructure.trim(),
         type: data.budgetType,
         state: data.state,
         children: [
@@ -1435,17 +1918,16 @@ import {
         version: Number(data.version),
         revision: Number(data.revision),
         frequency: data.frequency,
-        typology: data.typology,
+        associatedStructure: data.associatedStructure.trim(),
         type: data.budgetType,
         state: data.state,
       });
     }
-    const addedLevel = editing.type === "new-child";
     ensureFundingSources();
     persist();
     renderBudgets();
     closeModal();
-    toast(addedLevel ? "Nuova voce aggiunta al budget" : "Modifiche salvate");
+    toast("Modifiche salvate");
   });
   $("#close-modal").addEventListener("click", closeModal);
   $("#cancel-modal").addEventListener("click", closeModal);
@@ -1454,7 +1936,7 @@ import {
   });
   ["dist-total", "dist-duration", "dist-periodicity", "dist-start"].forEach(
     (id) =>
-      $(`#${id}`).addEventListener("change", () => {
+      $(`#${id}`).addEventListener("input", () => {
         $("#dist-total").setCustomValidity("");
         renderDistributionSchedule();
       }),
@@ -1515,7 +1997,13 @@ import {
   $("#component-purchase-date").addEventListener("input", (event) =>
     event.target.setCustomValidity(""),
   );
-  ["component-amount", "component-first-due", "component-installments", "component-interval", "component-interest"].forEach((id) =>
+  [
+    "component-amount",
+    "component-first-due",
+    "component-installments",
+    "component-interval",
+    "component-interest",
+  ].forEach((id) =>
     $(`#${id}`).addEventListener("input", (event) => {
       if (id === "component-first-due") event.target.setCustomValidity("");
       if ($("#component-payment-mode").value !== "manuale") planDirty = true;
@@ -1535,8 +2023,13 @@ import {
     renderComponentPaymentFields(Number(event.target.value)),
   );
   $("#component-payment-fields").addEventListener("input", (event) => {
-    if (event.target.matches("[data-payment-month]") && $("#component-payment-mode").value === "manuale") {
-      draftManualPayments[Number(event.target.dataset.paymentMonth)] = Number(event.target.value || 0);
+    if (
+      event.target.matches("[data-payment-month]") &&
+      $("#component-payment-mode").value === "manuale"
+    ) {
+      draftManualPayments[Number(event.target.dataset.paymentMonth)] = Number(
+        event.target.value || 0,
+      );
       updateComponentPreview();
     }
   });

@@ -10,7 +10,8 @@ Piccolo ambiente modulare e modificabile in Visual Studio Code, composto da:
 - `assets/js/components/`: componenti che costruiscono le singole tabelle;
 - `assets/js/data/demo-data.js`: dataset dimostrativo separato dalla logica;
 - `assets/js/core/formatters.js`: formattatori e funzioni condivise;
-- `assets/js/core/capex-plan.js`: generazione rate, pagamenti annuali e ammortamento demo;
+- `assets/js/core/budget-hierarchy.js`: gerarchia, percentuali e controlli della pianificazione;
+- `assets/js/core/capex-plan.js`: logica CAPEX legacy conservata ma non esposta nella nuova redazione;
 - `server.py`: mini server locale scritto con la sola libreria standard Python;
 - `schema.sql`: struttura del piccolo database SQLite;
 - `schema_normalizzato.sql`: schema relazionale pensato per l'applicazione;
@@ -24,7 +25,7 @@ La versione monolitica precedente non fa parte del progetto corrente: il server 
 
 Non servono `npm`, pacchetti Python o connessioni esterne.
 
-Per controllare i calcoli CAPEX, se Node.js è disponibile: `node --test tests/capex-plan.test.mjs`. Node.js è facoltativo per l'uso del mockup.
+Per controllare gerarchia, versioning e calcoli legacy CAPEX, se Node.js è disponibile: `node --test tests/*.test.mjs`. Node.js è facoltativo per l'uso del mockup.
 
 ## Avvio rapido
 
@@ -58,11 +59,11 @@ Lo ZIP esclude i database locali di lavoro. Per rigenerarlo dopo modifiche al mo
 
 I componenti sono funzioni JavaScript pure: ricevono dati e restituiscono HTML. `app.js` conserva le regole applicative e collega pulsanti, filtri, popup e persistenza.
 
-Nella schermata **Gestione Budget**, sulla riga verde di ogni budget è disponibile **＋ Aggiungere voci**. Apre un modulo vuoto per il codice e la descrizione del nuovo livello/commessa; la nuova riga bianca viene inserita sotto il budget dopo il salvataggio. I campi obbligatori e l'univocità del codice impediscono di salvare righe incomplete o duplicate.
+Nella schermata **Gestione Budget** ogni riga rappresenta una versione del budget. Le precedenti righe bianche di dettaglio e il comando **Aggiungere voci** non sono più esposti: la gestione avviene tramite versioning. **Copia** duplica il budget assegnandogli il numero di versione successivo e lo imposta inizialmente come `Disattivo`; **Elimina** richiede una conferma e non permette di rimuovere l’ultimo budget rimasto. Gli unici stati dell’intestazione sono `Attivo`, con l’intera riga verde, e `Disattivo`, con l’intera riga grigia. La colonna **Struttura analitica associata** parte vuota; nel modulo resta un campo testuale libero, senza selezione vincolata a CDC o commessa.
 
-Le tabelle 1 e 2 restano riepiloghi compatti per entrambi i tipi di budget, con ricavi e costi separati. La terza tabella operativa dipende invece dal tipo selezionato: per il budget **Ordinario** compare solo la tabella 3 di pianificazione mensile; per il budget **Investimento** compare solo la tabella 4 del piano CAPEX. Nella tabella 1 non compare la durata; per i soli investimenti compare la **Fonte di finanziamento**, modificabile direttamente nella cella e salvata in SQLite. Nella tabella 4 il selettore **Anno** mostra gennaio–dicembre dell'anno scelto, la **Voce** CAPEX, fonte, vita utile, stato, pagamenti dell'anno, capitale residuo, CAPEX iniziale, rettifiche, CAPEX aggiornato e ammortamento dell'anno. La categoria non è esposta. Nel modulo della voce si sceglie un piano manuale di dodici mesi, rate al fornitore o finanziamento; negli ultimi due casi **Genera piano rate** può produrre scadenze su più anni. La somma del **capitale** di tutte le rate deve coincidere con il CAPEX aggiornato; gli interessi del finanziamento sono separati e aumentano le uscite, non il CAPEX. La vita utile e la data di entrata in funzione determinano una stima di ammortamento distinta dal piano di pagamento.
+La nuova **Redazione Budget Analitica** usa tre tabelle collegate. Per l'ordinario, il Livello 1 contiene il budget inserito dall'utente; il Livello 2 appartiene esplicitamente a un padre e il suo budget è calcolato dalla percentuale sul padre. Sono mostrate sia la percentuale sul padre sia quella sul totale generale. La pianificazione mensile contiene una riga per ogni elemento di Livello 2. Se la somma dei mesi non coincide con il budget calcolato, la riga diventa rossa e il salvataggio viene bloccato. Cambiando il budget del padre si ricalcolano i figli, ma non i mesi.
 
-Nella Redazione Budget Analitica, **Tipo budget** permette di passare tra budget ordinari e di investimento; **Nome BDG** sceglie il budget del tipo selezionato. Nell'ordinario, **＋ Nuova voce** nella tabella 3 apre un modulo per scegliere livello, costo/ricavo, sottoconto, importo e ripartizione iniziale. Il campo **Voce personalizzata** è testo libero: consente di descrivere anche una voce non ancora utilizzata. Dopo l'aggiunta, la nuova riga compare nella tabella 3 e le tabelle 2 e 1 ricalcolano subito i totali; dopo il salvataggio, i riepiloghi vengono riletti dalle viste SQL del database relazionale. La successiva modifica delle rate si fa con **Ripartisci**. Nell'investimento, la tabella 3 è nascosta e si usa **＋ Nuova voce CAPEX** nella tabella 4.
+Per l'investimento/commessa il mockup usa un solo livello: nella prima tabella compaiono le righe di budget (per esempio costo personale o costo impianto), la seconda informa che non è previsto un Livello 2 e la terza mantiene la pianificazione mensile. Non esistono più le nature Costo/Ricavo, le voci e i sottoconti della precedente proposta. Tutte e tre le tabelle offrono lettura, aggiunta da elementi configurati, modifica e rimozione; codici e descrizioni non sono testo libero. Non esiste una colonna Azioni: selezionando una o più righe si attivano i comandi **Modifica** ed **Elimina** nell'intestazione della tabella. Un secondo clic su una riga selezionata la deseleziona. Senza selezione le tabelle mostrano tutte le righe; la selezione di uno o più Livelli 1 filtra l'unione dei figli collegati nel Livello 2 e la selezione di uno o più figli filtra le relative pianificazioni mensili. La cancellazione di una pianificazione rende il budget incompleto e ne impedisce il salvataggio finché la riga non viene riaggiunta e riallineata.
 
 La specifica per lo sviluppatore Wingest è in `docs/SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md`. Il pacchetto distribuibile, privo dei database di lavoro, si genera con `scripts/create_developer_package.py`.
 

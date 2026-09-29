@@ -31,28 +31,28 @@
           <div class="field"><label for="filter-from">Dal</label><input id="filter-from" type="date" value="2027-01-01"></div>
           <div class="field"><label for="filter-to">Al</label><input id="filter-to" type="date" value="2027-12-31"></div>
           <div class="field grow"><label for="filter-structure">Struttura analitica</label><select id="filter-structure"><option value="all">Tutte</option><option>Grana</option><option>Tradizionali</option><option>Siero</option><option>Burro</option><option>Staff</option><option>Investimenti</option></select></div>
-          <div class="field"><label for="filter-status">Stato</label><select id="filter-status"><option value="all">Tutti</option><option>Bozza</option><option>Creato</option><option>Completato</option></select></div>
+          <div class="field"><label for="filter-status">Stato</label><select id="filter-status"><option value="all">Tutti</option><option>Attivo</option><option>Disattivo</option></select></div>
           <button class="btn blue" type="button" id="apply-filters">Applica filtri</button>
           <button class="btn primary" type="button" id="create-budget">＋ Crea BDG</button>
         </div>
 
         <div class="section-head">
-          <h2>Budget e livelli analitici</h2>
-          <span class="muted">La riga verde modifica l’intestazione o aggiunge una voce; le righe sottostanti modificano o aprono il singolo livello.</span>
+          <h2>Budget e versioni</h2>
+          <span class="muted">Ogni riga rappresenta una versione del budget. La struttura analitica associata è inizialmente vuota e liberamente compilabile.</span>
         </div>
         <div class="table-filter-bar">
           <label for="budget-search">Cerca nella tabella</label>
-          <input class="table-search" id="budget-search" type="search" placeholder="Nome, codice, stato o tipologia…" autocomplete="off">
+          <input class="table-search" id="budget-search" type="search" placeholder="Nome, versione, stato o struttura associata…" autocomplete="off">
         </div>
         <div class="table-wrap">
           <table aria-label="Gestione budget analitici">
             <thead>
-              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Tipologia</th><th>Codice / livello</th><th>Stato</th><th>Tipo budget</th><th>Azioni</th></tr>
+              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Struttura analitica associata</th><th>Stato</th><th>Tipo budget</th><th>Azioni</th></tr>
             </thead>
             <tbody id="budget-list"></tbody>
           </table>
         </div>
-        <div class="investment-note"><strong>Regola proposta:</strong> i budget ordinari accolgono sottoconti economici; i budget di investimento possono includere anche conti patrimoniali e devono essere collegati a una commessa di capitalizzazione con analisi CAPEX.</div>
+        <div class="investment-note"><strong>Regola proposta:</strong> ogni budget usa la struttura analitica associata; per gli investimenti la commessa espone un unico livello di righe di budget.</div>
       </section>
 
       <section class="page" id="page-analysis" aria-labelledby="page-title">
@@ -61,17 +61,17 @@
           <strong id="analysis-name">Produzione Grana</strong>
           <span>Codice: <b id="analysis-code">GRA-001</b></span>
           <span>Periodo: <b id="analysis-period">2027</b></span>
-          <span class="status draft" id="analysis-status">Bozza</span>
+          <span class="status active" id="analysis-status">Attivo</span>
           <div class="spacer"></div>
-          <button class="btn" type="button" id="open-adjustments">Rettifiche <span id="adjustment-count">(2)</span></button>
+          <button class="btn" type="button" id="open-adjustments" hidden>Rettifiche <span id="adjustment-count">(2)</span></button>
           <button class="btn primary" type="button" id="save-analysis">Salva analisi</button>
         </div>
 
         <div id="economic-panel">
           <div class="toolbar">
-            <div class="field"><label for="analysis-type">Tipo budget</label><select id="analysis-type"><option value="Ordinario">Ordinario</option><option value="Investimento">Investimento</option></select></div>
+            <div class="field"><label for="analysis-type">Tipo budget</label><select id="analysis-type" disabled><option value="Ordinario">Ordinario</option><option value="Investimento">Investimento</option></select></div>
             <div class="field grow"><label for="analysis-budget-field">Nome BDG</label><select id="analysis-budget-field"></select></div>
-            <div class="field grow"><label for="analysis-structure-field">Struttura analitica</label><input id="analysis-structure-field" value="Produzione Grana"></div>
+            <div class="field grow"><label for="analysis-structure-field">Struttura analitica</label><input id="analysis-structure-field" value="Produzione Grana" readonly></div>
             <div class="field"><label for="analysis-frequency">Periodo</label><select id="analysis-frequency"><option>Annuale</option><option>Mensile</option><option>Trimestrale</option></select></div>
             <div class="field"><label for="analysis-from">Dal</label><input id="analysis-from" type="date" value="2027-01-01"></div>
             <div class="field"><label for="analysis-to">Al</label><input id="analysis-to" type="date" value="2027-12-31"></div>
@@ -80,40 +80,40 @@
 
           <div class="analysis-grid">
             <section class="panel">
-              <div class="panel-title">1. Livelli del budget</div>
+              <div class="panel-title planning-title"><span>1. Livello 1</span><button class="btn primary small" type="button" id="add-l1">＋ Aggiungi</button></div>
               <div class="table-filter-bar compact">
                 <label for="level-search">Cerca</label>
-                <input class="table-search" id="level-search" type="search" placeholder="Codice, descrizione o fonte…" autocomplete="off">
+                <input class="table-search" id="level-search" type="search" placeholder="Codice o descrizione…" autocomplete="off">
               </div>
-              <div class="table-wrap"><table aria-label="Livelli del budget"><thead><tr id="level-head"></tr></thead><tbody id="level-table"></tbody></table></div>
+              <div class="table-wrap"><table aria-label="Livello 1 del budget"><thead><tr id="level-head"><th>Codice</th><th>Descrizione</th><th class="num">Budget</th><th class="num">% sul totale</th><th>Azioni</th></tr></thead><tbody id="level-table"></tbody></table></div>
+              <div id="level1-allocation-message" class="planning-allocation-message" role="status" hidden></div>
             </section>
 
             <section class="panel">
-              <div class="panel-title">2. Voci e sottoconti collegati</div>
+              <div class="panel-title planning-title"><span>2. Livello 2</span><button class="btn primary small" type="button" id="add-l2">＋ Aggiungi</button></div>
               <div class="table-filter-bar compact">
                 <label for="voice-search">Cerca</label>
-                <input class="table-search" id="voice-search" type="search" placeholder="Codice, voce o sottoconto…" autocomplete="off">
+                <input class="table-search" id="voice-search" type="search" placeholder="Codice o descrizione…" autocomplete="off">
               </div>
-              <div class="table-wrap"><table aria-label="Voci e sottoconti"><thead><tr id="voice-head"><th>Codice</th><th>Livello</th><th>Voce</th><th>Sottoconto</th><th>Durata</th><th class="num">Tot. ricavi</th><th class="num">Tot. costi</th></tr></thead><tbody id="voice-table"></tbody></table></div>
+              <div class="table-wrap"><table aria-label="Livello 2 del budget"><thead><tr id="voice-head"><th>Codice</th><th>Descrizione</th><th class="num">Budget</th><th class="num">% sul totale</th><th>Azioni</th></tr></thead><tbody id="voice-table"></tbody></table></div>
+              <div id="level2-allocation-message" class="planning-allocation-message" role="status" hidden></div>
             </section>
 
             <section id="monthly-panel" class="panel panel-wide">
               <div class="panel-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
                 <span>3. Pianificazione mensile</span>
-                <div class="month-tabs" role="tablist" aria-label="Natura pianificazione">
-                  <button type="button" role="tab" aria-selected="true" data-nature-tab="cost">Costi</button>
-                  <button type="button" role="tab" aria-selected="false" data-nature-tab="revenue">Ricavi</button>
-                </div>
-                <button class="btn" type="button" id="new-voice">＋ Nuova voce</button>
-                <span class="total-chip" id="grand-total">TOTALE COSTI: 0 €</span>
+                <button class="btn primary small" type="button" id="add-monthly">＋ Aggiungi</button>
+                <button class="btn small" type="button" id="toggle-monthly-adjustments" aria-expanded="false">Rettifica</button>
+                <button type="button" id="new-voice" hidden>Nuova voce</button>
+                <span class="total-chip" id="grand-total">TOTALE BUDGET: 0 €</span>
               </div>
               <div class="table-filter-bar compact">
                 <label for="monthly-search">Cerca</label>
-                <input class="table-search" id="monthly-search" type="search" placeholder="Codice, descrizione, voce o sottoconto…" autocomplete="off">
+                <input class="table-search" id="monthly-search" type="search" placeholder="Codice o descrizione…" autocomplete="off">
               </div>
               <div class="table-wrap">
-                <table aria-label="Pianificazione mensile costi e ricavi">
-                  <thead><tr><th>Codice</th><th>Descrizione</th><th>Voce</th><th>Sottoconto</th><th>Gen</th><th>Feb</th><th>Mar</th><th>Apr</th><th>Mag</th><th>Giu</th><th>Lug</th><th>Ago</th><th>Set</th><th>Ott</th><th>Nov</th><th>Dic</th><th class="num">Totale</th><th>Azioni</th></tr></thead>
+                <table aria-label="Pianificazione mensile del budget">
+                  <thead><tr id="monthly-head"></tr></thead>
                   <tbody id="monthly-table"></tbody>
                   <tfoot id="monthly-foot"></tfoot>
                 </table>
@@ -168,6 +168,13 @@
           </form>
         </div>
       </aside>
+    </div>
+
+    <div class="modal-backdrop" id="planning-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="planning-modal-title">
+        <div class="modal-head"><h2 id="planning-modal-title">Elemento budget</h2><div class="spacer"></div><button class="btn small" type="button" id="close-planning-modal">Chiudi</button></div>
+        <form id="planning-form"><div class="modal-body" id="planning-modal-body"></div><div class="modal-foot"><button class="btn" type="button" id="cancel-planning-modal">Annulla</button><button class="btn primary" type="submit">Salva</button></div></form>
+      </div>
     </div>
 
     <div class="modal-backdrop" id="edit-modal" aria-hidden="true">

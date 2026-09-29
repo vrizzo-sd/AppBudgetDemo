@@ -75,7 +75,7 @@ def insert_budget_structure(connection: sqlite3.Connection, state: dict) -> tupl
             (
                 budget["id"], budget["year"], budget["name"], budget.get("version", 1),
                 budget.get("revision", 0), budget.get("frequency", "Annuale"),
-                budget.get("typology", "CDC"), budget.get("type", "Ordinario"),
+                budget.get("associatedStructure", ""), budget.get("type", "Ordinario"),
                 budget.get("state", "Bozza"),
             ),
         )

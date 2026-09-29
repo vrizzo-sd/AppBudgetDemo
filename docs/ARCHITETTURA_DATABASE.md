@@ -5,6 +5,8 @@
 Il prototipo conserva lo stato modificabile della pagina come JSON nella tabella `mockup_state` di `data/budget_mockup.db`. Dopo ogni salvataggio, il server aggiorna anche `data/budget_wingest.db`, con tabelle relazionali interrogabili da SQLTools.
 Il primo file facilita le modifiche rapide del mockup; il secondo rende consultabili budget, livelli, voci, valori mensili, rettifiche e CAPEX.
 
+**Aggiornamento del mockup 29/09/2026.** La pagina corrente persiste nel JSON anche `budget.planning`: catalogo degli elementi configurati, righe di Livello 1, righe di Livello 2 con riferimento esplicito al padre, percentuale sul padre, dodici valori mensili e stato di presenza della pianificazione. La proiezione relazionale descritta sotto è precedente al nuovo disegno e deve essere aggiornata prima di essere considerata uno schema definitivo.
+
 Il salvataggio JSON non è il modello consigliato per l'applicazione definitiva, perché rende difficili:
 
 - interrogazioni e controlli puntuali;
@@ -38,11 +40,11 @@ erDiagram
 
 Intestazione corrispondente alla riga verde.
 
-Campi principali: `id`, `code`, `name`, `year`, `version`, `frequency`, `budget_type`, `structure_type`, `status`, `revision_no`.
+Campi principali: `id`, `code`, `name`, `year`, `version`, `frequency`, `budget_type`, `structure_type`, `status`, `revision_no`. Nel mockup `structure_type` memorizza la **struttura analitica associata** come testo libero, senza vincolo a CDC o commessa; `status` assume soltanto i valori `Attivo` e `Disattivo`.
 
 ### `budget_level`
 
-Livelli collocati sotto la riga verde, per esempio `GRA-001`, `TRA-001` o `CAP-DEP-01`.
+Livelli utilizzati internamente nell’analisi, per esempio `GRA-001`, `TRA-001` o `CAP-DEP-01`. Non sono più esposti come righe bianche nella pagina Gestione Budget.
 
 Campi principali: `id`, `budget_id`, `code`, `name`, `funding_source`, `status`, `parent_level_id`. `funding_source` è valorizzato solo per i livelli del budget di investimento; nel mockup è modificabile direttamente nella tabella 1.
 
