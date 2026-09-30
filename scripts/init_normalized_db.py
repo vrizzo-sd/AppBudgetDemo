@@ -172,14 +172,17 @@ def insert_capex(connection: sqlite3.Connection, state: dict, level_by_code: dic
             level_id = level_by_code.get(normalize_code(level.get("code")))
             if level_id is None:
                 continue
-            cursor = connection.execute(
-                """
-                INSERT INTO capex_project(source_key, budget_level_id, code, description, state)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (level["id"], level_id, level["code"], level["name"], level.get("state", "Bozza")),
-            )
-            project_by_code[normalize_code(level["code"])] = (cursor.lastrowid, int(budget["year"]))
+            code = normalize_code(level["code"])
+            existing = project_by_code.get(code)
+            if existing is None:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO capex_project(source_key, budget_level_id, code, description, state)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (level["id"], level_id, level["code"], level["name"], level.get("state", "Bozza")),
+                )
+                project_by_code[code] = (cursor.lastrowid, int(budget["year"]))
 
     for component in state.get("capexComponents", []):
         payments = component.get("payments", [])
