@@ -1,9 +1,12 @@
 import {
   clone,
+  decimalInput,
   escapeHtml,
   euro,
+  euroCents,
   months,
   normalizeCode,
+  parseItalianAmount,
   statusClass,
 } from "./core/formatters.js";
 import { budgetRowsHtml } from "./components/budget-list.js";
@@ -101,7 +104,8 @@ import {
   let planDirty = false;
   let redistributionRowId = null;
   let monthlyAdjustmentsVisible = false;
-  const adjustmentSaveTimers = new Map();
+  let monthlyHistory = load("wg-mockup-monthly-history", []);
+  const adjustmentDrafts = new Map();
   let selectedLevel1Ids = new Set();
   let selectedLevel2Ids = new Set();
   let selectedMonthlyIds = new Set();
@@ -256,6 +260,7 @@ import {
         "wg-mockup-adjustments",
         JSON.stringify(adjustments),
       );
+      localStorage.setItem("wg-mockup-monthly-history", JSON.stringify(monthlyHistory));
       localStorage.setItem("wg-mockup-capex", JSON.stringify(capexComponents));
       localStorage.setItem(
         "wg-mockup-ordinary-rows",
@@ -275,6 +280,7 @@ import {
           body: JSON.stringify({
             budgets,
             adjustments,
+            monthlyHistory,
             capexComponents,
             ordinaryRows,
             investmentRows,
@@ -305,6 +311,9 @@ import {
         adjustments = Array.isArray(state.adjustments)
           ? state.adjustments
           : adjustments;
+        monthlyHistory = Array.isArray(state.monthlyHistory)
+          ? state.monthlyHistory
+          : monthlyHistory;
         capexComponents = Array.isArray(state.capexComponents)
           ? state.capexComponents
           : capexComponents;
@@ -416,30 +425,24 @@ import {
   }
 
   function planningAdjustment(levelId, month, year = monthlyYear) {
-    return adjustments
+    const result = adjustments
       .filter((item) => item.scope === "planning" && item.budgetId === currentBudget.id && item.rowId === levelId && item.month === month && Number(item.year ?? currentBudget.year) === Number(year))
       .reduce((totals, item) => {
         if (item.status === "Approvata") totals.approved += Number(item.amount);
         if (item.status === "Bozza") totals.draft += Number(item.amount);
-        if (item.status === "In approvazione") totals.pending += Number(item.amount);
+        if (item.status === "In approvazione") {
+          totals.pending += Number(item.amount);
+          totals.hasPending = true;
+        }
         if (item.status === "Bozza" && !totals.reason) totals.reason = item.reason || "";
         return totals;
-      }, { approved: 0, draft: 0, pending: 0, reason: "" });
-  }
-
-  function flushInlineAdjustments() {
-    if (!adjustmentSaveTimers.size) return;
-    adjustmentSaveTimers.forEach((timer) => clearTimeout(timer));
-    adjustmentSaveTimers.clear();
-    [...document.querySelectorAll("#monthly-table [data-adjust-month]")].forEach((input) => {
-      if (Math.round(Number(input.value) * 100) !== Math.round(planningAdjustment(input.dataset.adjustLevel, Number(input.dataset.adjustMonth)).approved * 100)) {
-        applyInlineAdjustment(input.dataset.adjustLevel, Number(input.dataset.adjustMonth), input.value, monthlyYear);
-      }
-    });
+      }, { approved: 0, draft: 0, pending: 0, hasPending: false, reason: "" });
+    const key = `${currentBudget.id}:${levelId}:${year}:${month}`;
+    if (adjustmentDrafts.has(key)) result.draftValue = adjustmentDrafts.get(key).raw;
+    return result;
   }
 
   function openAnalysis(budgetId) {
-    flushInlineAdjustments();
     currentBudget = budgets.find((b) => b.id === budgetId) || budgets[0];
     currentChild = currentBudget.children[0];
     analysisScope = "budget";
@@ -583,9 +586,10 @@ import {
   }
 
   function renderMonthly() {
-    flushInlineAdjustments();
     const planning = currentBudget.planning;
     const investment = currentBudget.type === "Investimento";
+    $("#adjustment-help").hidden = !monthlyAdjustmentsVisible;
+    $("#monthly-panel table").classList.toggle("adjustment-mode", monthlyAdjustmentsVisible);
     $("#monthly-year-label").hidden = !investment;
     $("#monthly-year").hidden = !investment;
     if (investment) {
@@ -627,6 +631,89 @@ import {
     }
     $("#monthly-foot").innerHTML =
       hierarchyMonthlyTotalHtml(planning, visibleLevels, monthlyAdjustmentsVisible, planningAdjustment, monthlyYear);
+    updateAdjustmentSubmitButton();
+    if (!$("#monthly-history").hidden) renderMonthlyHistory();
+  }
+
+  function adjustmentDraftKey(levelId, month, year = monthlyYear) {
+    return `${currentBudget.id}:${levelId}:${year}:${month}`;
+  }
+
+  function currentAdjustmentDrafts() {
+    return [...adjustmentDrafts.values()].filter(
+      (draft) => draft.budgetId === currentBudget.id && draft.year === monthlyYear,
+    );
+  }
+
+  function updateAdjustmentSubmitButton() {
+    const button = $("#submit-monthly-adjustments");
+    button.hidden = !monthlyAdjustmentsVisible;
+    const count = currentAdjustmentDrafts().length;
+    button.textContent = count ? `Invia rettifica (${count})` : "Invia rettifica";
+    button.title = count ? "Apri il box per motivare e inviare la richiesta" : "Modifica prima almeno una cella nelle colonne Rett.";
+    button.disabled = count === 0;
+  }
+
+  function collectAdjustmentChanges() {
+    const changes = [];
+    for (const draft of currentAdjustmentDrafts()) {
+      const level = planningLevel(draft.levelId);
+      if (!level || planningAdjustment(level.id, draft.month, draft.year).hasPending) {
+        return { error: "Una voce modificata non è più disponibile o ha già una rettifica in approvazione." };
+      }
+      const proposed = parseItalianAmount(draft.raw);
+      const base = currentBudget.type === "Investimento"
+        ? planningYearMonths(level, draft.year, currentBudget.year)[draft.month]
+        : level.months[draft.month];
+      if (proposed == null ||
+        Math.round((Number(base) + proposed) * 100) < 0) {
+        return { error: `Valore non valido per ${level.name}, ${months[draft.month]}: usa il formato italiano (es. 1.000,50) e mantieni il budget non negativo.` };
+      }
+      const approved = planningAdjustment(level.id, draft.month, draft.year).approved;
+      const amountCents = Math.round(proposed * 100) - Math.round(approved * 100);
+      if (amountCents) changes.push({ level, year: draft.year, month: draft.month, before: approved, after: Math.round(proposed * 100) / 100, amount: amountCents / 100 });
+    }
+    return { changes };
+  }
+
+  function createMonthlySnapshot(requestId, reason, createdAt, changes) {
+    const planning = currentBudget.planning;
+    const levels = planning.mode === "single-level" ? planning.level1 : planning.level2;
+    return {
+      id: requestId,
+      budgetId: currentBudget.id,
+      budgetName: currentBudget.name,
+      year: monthlyYear,
+      createdAt,
+      reason,
+      changes: changes.map(({ level, month, before, after }) => ({ levelId: level.id, month, before, after })),
+      rows: levels.filter((level) => level.monthlyActive !== false).map((level) => {
+        const base = planning.mode === "single-level"
+          ? planningYearMonths(level, monthlyYear, currentBudget.year)
+          : level.months;
+        const values = base.map((value, month) => {
+          const change = changes.find((item) => item.level.id === level.id && item.month === month);
+          return Math.round((Number(value) + (change ? change.after : planningAdjustment(level.id, month).approved)) * 100) / 100;
+        });
+        return { id: level.id, code: level.code, name: level.name, values };
+      }),
+    };
+  }
+
+  function renderMonthlyHistory() {
+    const entries = monthlyHistory.filter((entry) => entry.budgetId === currentBudget.id);
+    $("#monthly-history").innerHTML = entries.length ? entries.map((entry) => {
+      const status = adjustments.find((item) => item.requestId === entry.id)?.status || "In approvazione";
+      const rows = entry.rows.map((row) => {
+        const values = row.values.map((value, month) => {
+          const changed = entry.changes.some((item) => item.levelId === row.id && item.month === month);
+          return `<td class="num${changed ? " history-changed" : ""}">${euroCents.format(value)}</td>`;
+        }).join("");
+        const total = row.values.reduce((sum, value) => sum + Number(value), 0);
+        return `<tr><td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.name)}</td>${values}<td class="num">${euroCents.format(total)}</td></tr>`;
+      }).join("");
+      return `<details class="monthly-history-entry"><summary>${escapeHtml(new Date(entry.createdAt).toLocaleString("it-IT"))} · ${escapeHtml(entry.year)} · ${escapeHtml(status)} · ${escapeHtml(entry.reason)}</summary><p>Versione della tabella 3 proposta con la richiesta ${escapeHtml(entry.id)}. Le celle evidenziate sono state rettificate.</p><div class="table-wrap"><table><thead><tr><th>Codice</th><th>Descrizione</th>${months.map((month) => `<th>${month}</th>`).join("")}<th>Totale</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+    }).join("") : '<p class="muted">Nessuna versione salvata della tabella 3 per questo budget.</p>';
   }
 
   function capexForCurrent() {
@@ -1523,7 +1610,6 @@ import {
   $("#voice-search").addEventListener("input", renderAnalysis);
   $("#monthly-search").addEventListener("input", renderMonthly);
   $("#monthly-year").addEventListener("change", (event) => {
-    flushInlineAdjustments();
     monthlyYear = Number(event.target.value);
     renderMonthly();
   });
@@ -1532,6 +1618,75 @@ import {
     $("#toggle-monthly-adjustments").setAttribute("aria-expanded", String(monthlyAdjustmentsVisible));
     renderMonthly();
   });
+  $("#show-monthly-history").addEventListener("click", () => {
+    const panel = $("#monthly-history");
+    panel.hidden = !panel.hidden;
+    $("#show-monthly-history").setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) renderMonthlyHistory();
+  });
+  $("#submit-monthly-adjustments").addEventListener("click", () => {
+    const result = collectAdjustmentChanges();
+    if (result.error) return toast(result.error);
+    if (!result.changes.length) return toast("Modifica almeno una cella di rettifica.");
+    $("#adjustment-reason-summary").innerHTML =
+      `<p>${result.changes.length} ${result.changes.length === 1 ? "mese modificato" : "mesi modificati"} per ${escapeHtml(currentBudget.name)}, anno ${monthlyYear}. La richiesta resterà in approvazione.</p><ul>${result.changes.map(({ level, month, before, after }) => `<li>${escapeHtml(level.code)} · ${escapeHtml(level.name)} · ${months[month]}: ${euroCents.format(before)} → ${euroCents.format(after)}</li>`).join("")}</ul>`;
+    $("#adjustment-reason").value = "";
+    $("#adjustment-reason-modal").classList.add("open");
+    $("#adjustment-reason-modal").setAttribute("aria-hidden", "false");
+    $("#adjustment-reason").focus();
+  });
+  function closeAdjustmentReason() {
+    $("#adjustment-reason-modal").classList.remove("open");
+    $("#adjustment-reason-modal").setAttribute("aria-hidden", "true");
+  }
+  $("#close-adjustment-reason").addEventListener("click", closeAdjustmentReason);
+  $("#cancel-adjustment-reason").addEventListener("click", closeAdjustmentReason);
+  $("#adjustment-reason-modal").addEventListener("click", (event) => {
+    if (event.target.id === "adjustment-reason-modal") closeAdjustmentReason();
+  });
+  $("#adjustment-reason-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const reason = $("#adjustment-reason").value.trim();
+    if (!reason) {
+      $("#adjustment-reason").setCustomValidity("Scrivi la motivazione della rettifica.");
+      $("#adjustment-reason").reportValidity();
+      return;
+    }
+    const result = collectAdjustmentChanges();
+    if (result.error || !result.changes.length) return toast(result.error || "Nessuna modifica da inviare.");
+    const requestId = `RET-${Date.now()}`;
+    const createdAt = new Date().toISOString();
+    monthlyHistory.unshift(createMonthlySnapshot(requestId, reason, createdAt, result.changes));
+    result.changes.forEach(({ level, year, month, before, after, amount }, index) => {
+      adjustments.unshift({
+        id: `${requestId}-${index + 1}`,
+        requestId,
+        budgetId: currentBudget.id,
+        scope: "planning",
+        nature: "cost",
+        rowId: level.id,
+        rowLabel: `${level.code} · ${level.name}`,
+        year,
+        month,
+        amount,
+        before,
+        after,
+        reason,
+        attachment: "",
+        status: "In approvazione",
+        createdAt,
+      });
+      adjustmentDrafts.delete(adjustmentDraftKey(level.id, month, year));
+    });
+    persist();
+    closeAdjustmentReason();
+    renderAnalysis();
+    $("#monthly-history").hidden = false;
+    $("#show-monthly-history").setAttribute("aria-expanded", "true");
+    renderMonthlyHistory();
+    toast("Rettifica inviata in approvazione e salvata nello storico");
+  });
+  $("#adjustment-reason").addEventListener("input", (event) => event.target.setCustomValidity(""));
   $("#capex-search").addEventListener("input", renderCapex);
   $("#create-budget").addEventListener("click", () => openEdit("new"));
   $("#back-management").addEventListener("click", () => showPage("management"));
@@ -1993,75 +2148,43 @@ import {
     }
     return true;
   };
-  function applyInlineAdjustment(levelId, month, rawValue, year = monthlyYear) {
-    const level = planningLevel(levelId);
-    if (!level) return;
-    const value = Number(rawValue);
-    const previous = planningAdjustment(level.id, month, year).approved;
-    const baseMonth = currentBudget.type === "Investimento"
-      ? planningYearMonths(level, year, currentBudget.year)[month]
-      : level.months[month];
-    if (rawValue === "" || !Number.isFinite(value) || Math.abs(Math.round(value * 100) - value * 100) > 1e-7 || Math.round((Number(baseMonth) + value) * 100) < 0) {
-      toast("Rettifica non valida: usa due decimali e mantieni il budget del mese non negativo");
-      renderMonthly();
-      return;
-    }
-    const deltaCents = Math.round(value * 100) - Math.round(previous * 100);
-    if (deltaCents === 0) return;
-    adjustments.unshift({
-      id: `RET-${Date.now()}-${level.id}-${month}`,
-      budgetId: currentBudget.id,
-      scope: "planning",
-      nature: "cost",
-      rowId: level.id,
-      rowLabel: `${level.code} · ${level.name}`,
-      year,
-      month,
-      amount: deltaCents / 100,
-      reason: "Rettifica diretta dalla tabella mensile",
-      attachment: "",
-      status: "Approvata",
-    });
-    persist();
-    renderAdjustments();
-  }
   $("#monthly-table").addEventListener("input", (event) => {
     const input = event.target.closest("[data-adjust-month]");
     if (!input) return;
     const level = planningLevel(input.dataset.adjustLevel);
-    const amount = Number(input.value);
-    if (!level || input.value === "" || !Number.isFinite(amount)) return;
-    input.closest("td").querySelector("small").textContent =
-      `Budget mese ${euro.format(Number(currentBudget.type === "Investimento" ? planningYearMonths(level, monthlyYear, currentBudget.year)[Number(input.dataset.adjustMonth)] : level.months[Number(input.dataset.adjustMonth)]) + amount)}`;
-    const row = input.closest("tr");
-    const total = [...row.querySelectorAll("[data-adjust-month]")].reduce((sum, cell) => sum + Number(cell.value || 0), 0);
-    const base = (currentBudget.type === "Investimento" ? planningYearMonths(level, monthlyYear, currentBudget.year) : level.months).reduce((sum, value) => sum + Number(value), 0);
-    row.querySelector("[data-monthly-adjustment]").textContent = euro.format(total);
-    row.querySelector("[data-monthly-updated]").textContent = euro.format(base + total);
-    const foot = $("#monthly-foot tr");
+    if (!level) return;
     const month = Number(input.dataset.adjustMonth);
-    const monthTotal = [...$("#monthly-table").querySelectorAll(`[data-adjust-month="${month}"]`)].reduce((sum, cell) => sum + Number(cell.value || 0), 0);
-    foot.children[2 + month * 2].textContent = euro.format(monthTotal);
-    const allAdjustments = [...$("#monthly-table").querySelectorAll("[data-adjust-month]")].reduce((sum, cell) => sum + Number(cell.value || 0), 0);
+    const amount = parseItalianAmount(input.value);
+    const approved = planningAdjustment(level.id, month).approved;
+    const key = adjustmentDraftKey(level.id, month);
+    if (amount != null && Math.round(amount * 100) === Math.round(approved * 100)) adjustmentDrafts.delete(key);
+    else adjustmentDrafts.set(key, { budgetId: currentBudget.id, year: monthlyYear, levelId: level.id, month, raw: input.value });
+    updateAdjustmentSubmitButton();
+    if (amount == null) return;
+    input.closest("td").querySelector("small").textContent =
+      `Budget ${euroCents.format(Number(currentBudget.type === "Investimento" ? planningYearMonths(level, monthlyYear, currentBudget.year)[month] : level.months[month]) + amount)}`;
+    const row = input.closest("tr");
+    const total = [...row.querySelectorAll("[data-adjust-month]")].reduce((sum, cell) => sum + (parseItalianAmount(cell.value) ?? 0), 0);
+    const base = (currentBudget.type === "Investimento" ? planningYearMonths(level, monthlyYear, currentBudget.year) : level.months).reduce((sum, value) => sum + Number(value), 0);
+    row.querySelector("[data-monthly-adjustment]").textContent = euroCents.format(total);
+    row.querySelector("[data-monthly-updated]").textContent = euroCents.format(base + total);
+    const foot = $("#monthly-foot tr");
+    const monthTotal = [...$("#monthly-table").querySelectorAll(`[data-adjust-month="${month}"]`)].reduce((sum, cell) => sum + (parseItalianAmount(cell.value) ?? 0), 0);
+    foot.children[2 + month * 2].textContent = euroCents.format(monthTotal);
+    const allAdjustments = [...$("#monthly-table").querySelectorAll("[data-adjust-month]")].reduce((sum, cell) => sum + (parseItalianAmount(cell.value) ?? 0), 0);
     const visibleBase = [...$("#monthly-table").querySelectorAll("[data-select-monthly]")].reduce((sum, tr) => sum + (currentBudget.type === "Investimento" ? planningYearMonths(planningLevel(tr.dataset.selectMonthly), monthlyYear, currentBudget.year) : planningLevel(tr.dataset.selectMonthly).months).reduce((total, value) => total + Number(value), 0), 0);
-    foot.children[26].textContent = euro.format(allAdjustments);
-    foot.children[27].textContent = euro.format(visibleBase + allAdjustments);
-    const year = monthlyYear;
-    const key = `${currentBudget.id}:${level.id}:${year}:${month}`;
-    clearTimeout(adjustmentSaveTimers.get(key));
-    adjustmentSaveTimers.set(key, setTimeout(() => {
-      adjustmentSaveTimers.delete(key);
-      applyInlineAdjustment(level.id, month, input.value, year);
-    }, 500));
+    foot.children[26].textContent = euroCents.format(allAdjustments);
+    foot.children[27].textContent = euroCents.format(visibleBase + allAdjustments);
   });
   $("#monthly-table").addEventListener("change", (event) => {
     const adjustmentInput = event.target.closest("[data-adjust-month]");
     if (adjustmentInput) {
-      const key = `${currentBudget.id}:${adjustmentInput.dataset.adjustLevel}:${monthlyYear}:${adjustmentInput.dataset.adjustMonth}`;
-      clearTimeout(adjustmentSaveTimers.get(key));
-      adjustmentSaveTimers.delete(key);
-      const month = Number(adjustmentInput.dataset.adjustMonth);
-      applyInlineAdjustment(adjustmentInput.dataset.adjustLevel, month, adjustmentInput.value);
+      const parsed = parseItalianAmount(adjustmentInput.value);
+      if (parsed != null) {
+        adjustmentInput.value = decimalInput.format(parsed);
+        const key = adjustmentDraftKey(adjustmentInput.dataset.adjustLevel, Number(adjustmentInput.dataset.adjustMonth));
+        if (adjustmentDrafts.has(key)) adjustmentDrafts.get(key).raw = adjustmentInput.value;
+      }
       return;
     }
     if (!event.target.closest("[data-plan-month]")) return;
@@ -2291,6 +2414,7 @@ import {
       closeVoiceModal();
       closeComponentModal();
       closeAdjustments();
+      closeAdjustmentReason();
       closeRedistribution();
     }
   });

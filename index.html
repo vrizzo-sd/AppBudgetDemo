@@ -104,9 +104,12 @@
                 <span>3. Pianificazione mensile</span>
                 <button class="btn primary small" type="button" id="add-monthly">＋ Aggiungi</button>
                 <button class="btn small" type="button" id="toggle-monthly-adjustments" aria-expanded="false">Rettifica</button>
+                <button class="btn small primary" type="button" id="submit-monthly-adjustments" hidden>Invia rettifica</button>
+                <button class="btn small" type="button" id="show-monthly-history" aria-expanded="false">Storico</button>
                 <button type="button" id="new-voice" hidden>Nuova voce</button>
                 <span class="total-chip" id="grand-total">TOTALE BUDGET: 0 €</span>
               </div>
+              <p id="adjustment-help" class="adjustment-help" hidden>Modifica gli importi nelle colonne «Rett.» usando la virgola per i centesimi (es. 1.000,50), poi scegli «Invia rettifica». Le richieste inviate restano in approvazione.</p>
               <div class="table-filter-bar compact">
                 <label for="monthly-search">Cerca</label>
                 <input class="table-search" id="monthly-search" type="search" placeholder="Codice o descrizione…" autocomplete="off">
@@ -120,6 +123,7 @@
                   <tfoot id="monthly-foot"></tfoot>
                 </table>
               </div>
+              <div id="monthly-history" class="monthly-history" hidden></div>
             </section>
           </div>
         </div>
@@ -170,6 +174,19 @@
           </form>
         </div>
       </aside>
+    </div>
+
+    <div class="modal-backdrop" id="adjustment-reason-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="adjustment-reason-title">
+        <div class="modal-head"><h2 id="adjustment-reason-title">Richiedi rettifica</h2><div class="spacer"></div><button class="btn small" type="button" id="close-adjustment-reason">Chiudi</button></div>
+        <form id="adjustment-reason-form">
+          <div class="modal-body">
+            <div class="full" id="adjustment-reason-summary"></div>
+            <div class="field full"><label for="adjustment-reason">Motivazione della rettifica</label><textarea id="adjustment-reason" required maxlength="2000" placeholder="Spiega perché chiedi questa variazione"></textarea></div>
+          </div>
+          <div class="modal-foot"><button class="btn" type="button" id="cancel-adjustment-reason">Annulla</button><button class="btn primary" type="submit">Invia in approvazione</button></div>
+        </form>
+      </div>
     </div>
 
     <div class="modal-backdrop" id="planning-modal" aria-hidden="true">

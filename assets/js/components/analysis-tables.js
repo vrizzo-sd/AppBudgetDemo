@@ -1,4 +1,4 @@
-import { escapeHtml, euro, normalizeCode } from "../core/formatters.js";
+import { decimalInput, escapeHtml, euro, euroCents, normalizeCode, parseItalianAmount } from "../core/formatters.js";
 import {
   level2Budget,
   levelPercentOfTotal,
@@ -125,13 +125,17 @@ export function hierarchyMonthlyRowsHtml(
       );
       const monthCells = yearMonths.map((value, month) => {
         const item = adjustmentFor(level.id, month);
-        const baseCell = `<td class="num"><input class="planning-number month-value" data-plan-month="${month}" data-plan-level="${escapeHtml(level.id)}" type="number" min="0" step="0.01" value="${Number(value || 0).toFixed(2)}" aria-label="Mese ${month + 1} di ${escapeHtml(level.name)}"></td>`;
-        const adjustmentCell = adjustmentView ? `<td class="num adjustment-cell"><input class="planning-number adjustment-value" data-adjust-level="${escapeHtml(level.id)}" data-adjust-month="${month}" type="number" step="0.01" value="${Number(item.approved || 0).toFixed(2)}" aria-label="Rettifica applicata ${month + 1} di ${escapeHtml(level.name)}"><small>Budget mese ${euro.format(Number(value) + item.approved)}</small>${item.pending ? `<small>In approvazione ${euro.format(item.pending)}</small>` : ""}</td>` : "";
+        const baseCell = adjustmentView
+          ? `<td class="num base-budget-amount">${euro.format(value)}</td>`
+          : `<td class="num"><input class="planning-number month-value" data-plan-month="${month}" data-plan-level="${escapeHtml(level.id)}" type="number" min="0" step="0.01" value="${Number(value || 0).toFixed(2)}" aria-label="Mese ${month + 1} di ${escapeHtml(level.name)}"></td>`;
+        const proposed = item.draftValue == null ? Number(item.approved || 0) : parseItalianAmount(item.draftValue);
+        const display = proposed == null ? item.draftValue : decimalInput.format(proposed);
+        const adjustmentCell = adjustmentView ? `<td class="num adjustment-cell"><input class="planning-number adjustment-value" data-adjust-level="${escapeHtml(level.id)}" data-adjust-month="${month}" type="text" inputmode="decimal" value="${escapeHtml(display)}" aria-label="Rettifica proposta ${month + 1} di ${escapeHtml(level.name)}" ${item.hasPending ? "disabled" : ""}><small>Budget ${euroCents.format(Number(value) + (proposed ?? Number(item.approved || 0)))}</small>${item.hasPending ? `<small>In approvazione ${euroCents.format(item.pending)}</small>` : ""}</td>` : "";
         return baseCell + adjustmentCell;
       }).join("");
       const adjustments = Array.from({ length: 12 }, (_, month) => adjustmentFor(level.id, month));
       const approved = adjustments.reduce((sum, item) => sum + item.approved, 0);
-      return `<tr class="${[invalid ? "planning-invalid" : "planning-valid", selectedIds.has(level.id) ? "planning-selected" : ""].filter(Boolean).join(" ")}" data-select-monthly="${escapeHtml(level.id)}" tabindex="0"><td>${escapeHtml(level.code)}</td><td>${escapeHtml(level.name)}</td>${monthCells}<td class="num" data-monthly-base="${escapeHtml(level.id)}"><strong>${euro.format(actual)}</strong></td>${adjustmentView ? `<td class="num" data-monthly-adjustment="${escapeHtml(level.id)}">${euro.format(approved)}</td><td class="num" data-monthly-updated="${escapeHtml(level.id)}"><strong>${euro.format(actual + approved)}</strong></td>` : ""}<td class="num difference">${invalid ? euro.format(difference) : "Quadrato"}</td><td class="planning-actions"><button class="btn small" type="button" data-distribute-row="${escapeHtml(level.id)}">Ripartisci</button><button class="action-icon is-hidden" type="button" data-planning-edit="monthly" data-planning-id="${escapeHtml(level.id)}" aria-hidden="true" tabindex="-1" title="Modifica">✎</button><button class="action-icon danger" type="button" data-planning-delete="monthly" data-planning-id="${escapeHtml(level.id)}" aria-label="Rimuovi pianificazione ${escapeHtml(level.name)}" title="Elimina">🗑</button></td></tr>`;
+      return `<tr class="${[invalid ? "planning-invalid" : "planning-valid", selectedIds.has(level.id) ? "planning-selected" : ""].filter(Boolean).join(" ")}" data-select-monthly="${escapeHtml(level.id)}" tabindex="0"><td>${escapeHtml(level.code)}</td><td>${escapeHtml(level.name)}</td>${monthCells}<td class="num" data-monthly-base="${escapeHtml(level.id)}"><strong>${euro.format(actual)}</strong></td>${adjustmentView ? `<td class="num" data-monthly-adjustment="${escapeHtml(level.id)}">${euroCents.format(approved)}</td><td class="num" data-monthly-updated="${escapeHtml(level.id)}"><strong>${euroCents.format(actual + approved)}</strong></td>` : ""}<td class="num difference">${invalid ? euro.format(difference) : "Quadrato"}</td><td class="planning-actions"><button class="btn small" type="button" data-distribute-row="${escapeHtml(level.id)}" ${adjustmentView ? "disabled" : ""}>Ripartisci</button><button class="action-icon is-hidden" type="button" data-planning-edit="monthly" data-planning-id="${escapeHtml(level.id)}" aria-hidden="true" tabindex="-1" title="Modifica">✎</button><button class="action-icon danger" type="button" data-planning-delete="monthly" data-planning-id="${escapeHtml(level.id)}" aria-label="Rimuovi pianificazione ${escapeHtml(level.name)}" title="Elimina" ${adjustmentView ? "disabled" : ""}>🗑</button></td></tr>`;
     })
     .join("");
 }
@@ -157,7 +161,7 @@ export function hierarchyMonthlyTotalHtml(
   const grand = monthTotals.reduce((sum, value) => sum + value, 0);
   const approvedMonths = Array.from({ length: 12 }, (_, month) => activeLevels.reduce((sum, level) => sum + adjustmentFor(level.id, month).approved, 0));
   const approved = approvedMonths.reduce((sum, value) => sum + value, 0);
-  return `<tr class="total-row"><td colspan="2">TOTALE</td>${monthTotals.map((value, month) => `<td class="num">${euro.format(value)}</td>${adjustmentView ? `<td class="num adjustment-cell">${euro.format(approvedMonths[month])}</td>` : ""}`).join("")}<td class="num">${euro.format(grand)}</td>${adjustmentView ? `<td class="num">${euro.format(approved)}</td><td class="num">${euro.format(grand + approved)}</td>` : ""}<td colspan="2"></td></tr>`;
+  return `<tr class="total-row"><td colspan="2">TOTALE</td>${monthTotals.map((value, month) => `<td class="num">${euro.format(value)}</td>${adjustmentView ? `<td class="num adjustment-cell">${euroCents.format(approvedMonths[month])}</td>` : ""}`).join("")}<td class="num">${euro.format(grand)}</td>${adjustmentView ? `<td class="num">${euroCents.format(approved)}</td><td class="num">${euroCents.format(grand + approved)}</td>` : ""}<td colspan="2"></td></tr>`;
 }
 
 export function levelRowsHtml(

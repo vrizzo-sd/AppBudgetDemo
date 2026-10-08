@@ -5,6 +5,28 @@ export const euro = new Intl.NumberFormat("it-IT", {
   maximumFractionDigits: 2,
 });
 
+export const decimalInput = new Intl.NumberFormat("it-IT", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  useGrouping: "always",
+});
+
+export const euroCents = new Intl.NumberFormat("it-IT", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+  useGrouping: "always",
+});
+
+export function parseItalianAmount(raw) {
+  const text = String(raw ?? "").trim();
+  if (!/^[+-]?(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d{1,2})?$/.test(text)) return null;
+  const amount = Number(text.replaceAll(".", "").replace(",", "."));
+  const cents = Math.round(amount * 100);
+  return Number.isSafeInteger(cents) ? cents / 100 : null;
+}
+
 export const months = [
   "Gen",
   "Feb",
