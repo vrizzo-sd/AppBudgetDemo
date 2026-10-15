@@ -106,7 +106,7 @@
                 <button class="btn small" type="button" id="toggle-monthly-adjustments" aria-expanded="false">Rettifica</button>
                 <button class="btn small primary" type="button" id="submit-monthly-adjustments" hidden>Invia rettifica</button>
                 <button class="btn small" type="button" id="cancel-request-edit" hidden>Annulla modifica rettifica</button>
-                <button class="btn small" type="button" id="show-monthly-history" aria-expanded="false">Rettifiche e storico</button>
+                <button class="btn small" type="button" id="show-monthly-history" aria-controls="workflow-requests">Rettifiche</button>
                 <button type="button" id="new-voice" hidden>Nuova voce</button>
                 <span class="total-chip" id="grand-total">TOTALE BUDGET: 0 €</span>
               </div>
@@ -124,10 +124,33 @@
                   <tfoot id="monthly-foot"></tfoot>
                 </table>
               </div>
-              <div id="monthly-history" class="monthly-history" hidden><div class="table-filter-bar"><label for="request-search">Cerca rettifiche</label><input id="request-search" type="search" placeholder="Motivazione, stato, anno o numero…"></div><div id="monthly-history-list"></div></div>
             </section>
           </div>
-          <div class="workflow-history" id="budget-workflow-history" aria-label="Storico revisioni e iter del budget"></div>
+          <div class="workflow-history" id="budget-workflow-history" aria-label="Rettifiche, revisioni e iter del budget">
+            <section class="panel" aria-label="Rettifiche e revisioni">
+              <div class="workflow-tabs" role="tablist" aria-label="Storico del budget">
+                <button id="workflow-requests-tab" type="button" role="tab" aria-selected="true" aria-controls="workflow-requests">Rettifiche <span id="workflow-request-count"></span></button>
+                <button id="workflow-revisions-tab" type="button" role="tab" aria-selected="false" aria-controls="workflow-revisions" tabindex="-1">Revisioni <span id="workflow-revision-count"></span></button>
+              </div>
+              <div id="workflow-requests" role="tabpanel" aria-labelledby="workflow-requests-tab">
+                <div class="table-filter-bar request-filters">
+                  <div class="field grow"><label for="request-search">Cerca rettifiche</label><input id="request-search" type="search" placeholder="Motivazione, stato, voce o numero…"></div>
+                  <div class="field"><label for="request-status">Stato rettifica</label><select id="request-status"><option value="all">Tutti</option><option>Bozza</option><option>In approvazione</option><option>Approvata</option><option>Respinta</option></select></div>
+                  <div class="field"><label for="request-from">Dal giorno</label><input id="request-from" type="date"></div>
+                  <div class="field"><label for="request-to">Al giorno</label><input id="request-to" type="date"></div>
+                  <button id="reset-request-filters" class="btn small" type="button">Azzera filtri</button>
+                </div>
+                <p id="request-filter-message" class="request-filter-message" role="status"></p>
+                <div id="monthly-history-list"></div>
+                <section id="request-detail" class="request-detail" aria-label="Dettaglio della rettifica selezionata" hidden></section>
+              </div>
+              <div id="workflow-revisions" role="tabpanel" aria-labelledby="workflow-revisions-tab" hidden></div>
+            </section>
+            <section class="panel" aria-label="Iter del budget o della rettifica">
+              <div class="panel-title iter-title"><span>Iter</span><button id="show-budget-iter" class="btn small" type="button">Iter budget</button></div>
+              <div id="workflow-iter" class="workflow-history-body"></div>
+            </section>
+          </div>
         </div>
 
         <section id="capex-panel" class="panel investment-details" hidden aria-label="Dettaglio investimento">

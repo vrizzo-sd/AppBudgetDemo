@@ -22,6 +22,8 @@ import {
 } from "./components/analysis-tables.js";
 import {
   ensureBudgetPlanning,
+  distributeLevel1Equally,
+  distributeLevel2Equally,
   level2Budget,
   monthlyTotal,
   planningAllYearsTotal,
@@ -50,7 +52,7 @@ import {
 } from "./core/capex-plan.js";
 import { ACTOR, canEditBudget, initializeWorkflow, effectivePlanning, transitionBudget,
   validateRequest, requestRecords, transitionRequest, approvedDelta } from "./core/budget-workflow.js";
-import { workflowPanelHtml, workflowHistoryHtml, requestHistoryHtml } from "./components/budget-workflow-panel.js";
+import { workflowPanelHtml, revisionHistoryHtml, requestHistoryHtml, requestDetailHtml, workflowIterHtml, filterRequests } from "./components/budget-workflow-panel.js";
 import { copyBudgetWithNextVersion } from "./core/budget-versioning.js";
 import {
   capexComponentsDefault,
@@ -110,6 +112,9 @@ import {
   let monthlyHistory = load("wg-mockup-monthly-history", []);
   const adjustmentDrafts = new Map();
   let editingRequestId = null;
+  let workflowTab = "requests";
+  let selectedRequestId = null;
+  let expandedRevisions = new Set();
   let workflowNoteContext = null;
   let confirmationResolver = null;
   let saveQueue = Promise.resolve(true);
@@ -475,6 +480,13 @@ import {
   function openAnalysis(budgetId) {
     editingRequestId = null;
     monthlyAdjustmentsVisible = false;
+    workflowTab = "requests";
+    selectedRequestId = null;
+    expandedRevisions.clear();
+    $("#request-search").value = "";
+    $("#request-status").value = "all";
+    $("#request-from").value = "";
+    $("#request-to").value = "";
     currentBudget = budgets.find((b) => b.id === budgetId) || budgets[0];
     currentChild = currentBudget.children[0];
     analysisScope = "budget";
@@ -664,7 +676,6 @@ import {
     $("#monthly-foot").innerHTML =
       hierarchyMonthlyTotalHtml(planning, visibleLevels, monthlyAdjustmentsVisible, planningAdjustment, monthlyYear);
     updateAdjustmentSubmitButton();
-    if (!$("#monthly-history").hidden) renderMonthlyHistory();
   }
 
   function adjustmentDraftKey(levelId, month, year = monthlyYear) {
@@ -733,13 +744,64 @@ import {
     };
   }
 
+  function currentRequest() {
+    return monthlyHistory.find((request) => request.id === selectedRequestId && request.budgetId === currentBudget.id) || null;
+  }
+
+  function renderWorkflowIter() {
+    $("#workflow-iter").innerHTML = workflowIterHtml(currentBudget, currentRequest());
+    $("#show-budget-iter").disabled = !currentRequest();
+  }
+
   function renderMonthlyHistory() {
-    $("#monthly-history-list").innerHTML = requestHistoryHtml(currentBudget, monthlyHistory, $("#request-search").value);
+    if (selectedRequestId && !currentRequest()) selectedRequestId = null;
+    const filters = { search: $("#request-search").value, status: $("#request-status").value,
+      from: $("#request-from").value, to: $("#request-to").value };
+    const invalidRange = filters.from && filters.to && filters.from > filters.to;
+    const visible = invalidRange ? [] : filterRequests(currentBudget, monthlyHistory, filters);
+    const total = monthlyHistory.filter((request) => request.budgetId === currentBudget.id).length;
+    $("#request-filter-message").textContent = invalidRange ? "La data iniziale deve precedere o coincidere con quella finale." : `${visible.length} richieste visibili su ${total}. Seleziona una richiesta per consultarne il dettaglio e l’iter.`;
+    $("#monthly-history-list").innerHTML = requestHistoryHtml(currentBudget, visible, selectedRequestId);
+    const request = currentRequest();
+    $("#request-detail").hidden = !request;
+    $("#request-detail").innerHTML = request ? requestDetailHtml(currentBudget, request) : "";
+    $("#workflow-request-count").textContent = `(${total})`;
+    renderWorkflowIter();
+  }
+
+  function renderWorkflowTabs() {
+    for (const name of ["requests", "revisions"]) {
+      const active = workflowTab === name;
+      $(`#workflow-${name}`).hidden = !active;
+      $(`#workflow-${name}-tab`).setAttribute("aria-selected", String(active));
+      $(`#workflow-${name}-tab`).tabIndex = active ? 0 : -1;
+    }
+    $("#workflow-revision-count").textContent = `(${currentBudget.revisions.length})`;
+  }
+
+  function showWorkflowTab(name, focus = false) {
+    workflowTab = name;
+    renderWorkflowTabs();
+    if (focus) $(`#workflow-${name}-tab`).focus();
+  }
+
+  function showRequests(requestId = null) {
+    selectedRequestId = requestId;
+    if (requestId) {
+      $("#request-search").value = "";
+      $("#request-status").value = "all";
+      $("#request-from").value = "";
+      $("#request-to").value = "";
+    }
+    renderMonthlyHistory();
+    showWorkflowTab("requests");
+    $("#budget-workflow-history").scrollIntoView({ block: "start" });
   }
 
   function renderWorkflow() {
     $("#budget-workflow-panel").innerHTML = workflowPanelHtml(currentBudget);
-    $("#budget-workflow-history").innerHTML = workflowHistoryHtml(currentBudget);
+    $("#workflow-revisions").innerHTML = revisionHistoryHtml(currentBudget, expandedRevisions);
+    renderWorkflowTabs();
     const editable = canEditBudget(currentBudget);
     $("#save-analysis").textContent = editable ? "Salva bozza" : "Salva stato";
     $("#analysis-status").textContent = currentBudget.workflowState;
@@ -770,6 +832,7 @@ import {
       const budget = scope === "budget" ? budgets.find((item) => item.id === id) : currentBudget;
       if (scope === "budget") transitionBudget(budget, action, budgets, adjustments, note);
       else {
+        selectedRequestId = id;
         const request = monthlyHistory.find((item) => item.id === id && item.budgetId === budget.id);
         if (!request) throw new Error("Rettifica non trovata.");
         transitionRequest(budget, request, action, adjustments, monthlyHistory, note);
@@ -790,6 +853,7 @@ import {
       if (request?.status !== "Bozza" || !currentBudget.isOfficial) return toast("Puoi modificare una bozza sulla versione ufficiale.");
       [...adjustmentDrafts].forEach(([key, value]) => { if (value.budgetId === currentBudget.id) adjustmentDrafts.delete(key); });
       editingRequestId = id;
+      selectedRequestId = id;
       monthlyYear = request.year;
       request.changes.forEach((change) => {
         const approved = approvedDelta(currentBudget, adjustments, change.levelId, change.year, change.month);
@@ -1766,12 +1830,7 @@ import {
     $("#toggle-monthly-adjustments").setAttribute("aria-expanded", String(monthlyAdjustmentsVisible));
     renderAnalysis();
   });
-  $("#show-monthly-history").addEventListener("click", () => {
-    const panel = $("#monthly-history");
-    panel.hidden = !panel.hidden;
-    $("#show-monthly-history").setAttribute("aria-expanded", String(!panel.hidden));
-    if (!panel.hidden) renderMonthlyHistory();
-  });
+  $("#show-monthly-history").addEventListener("click", () => showRequests());
   $("#submit-monthly-adjustments").addEventListener("click", () => {
     const result = collectAdjustmentChanges();
     if (result.error) return toast(result.error);
@@ -1821,8 +1880,7 @@ import {
       editingRequestId = null;
       closeAdjustmentReason();
       renderAnalysis();
-      $("#monthly-history").hidden = false;
-      $("#show-monthly-history").setAttribute("aria-expanded", "true");
+      showRequests(requestId);
       workflowBusy = true;
       $("main").inert = true;
       if (!await saveExplicit(request.status === "Bozza" ? "Bozza di rettifica salvata" : "Rettifica inviata in approvazione")) restoreWorkflow(beforeSave);
@@ -1831,7 +1889,64 @@ import {
   });
   $("#adjustment-reason").addEventListener("input", (event) => event.target.setCustomValidity(""));
   $("#cancel-request-edit").addEventListener("click", () => { clearRequestEdit(); renderAnalysis(); });
-  $("#request-search").addEventListener("input", renderMonthlyHistory);
+  $("#request-search").addEventListener("input", () => { selectedRequestId = null; renderMonthlyHistory(); });
+  ["request-status", "request-from", "request-to"].forEach((id) => $("#" + id).addEventListener("change", () => {
+    selectedRequestId = null;
+    renderMonthlyHistory();
+  }));
+  $("#reset-request-filters").addEventListener("click", () => {
+    $("#request-search").value = "";
+    $("#request-status").value = "all";
+    $("#request-from").value = "";
+    $("#request-to").value = "";
+    renderMonthlyHistory();
+  });
+  $("#show-budget-iter").addEventListener("click", () => { selectedRequestId = null; renderMonthlyHistory(); });
+  ["requests", "revisions"].forEach((name) => $("#workflow-" + name + "-tab").addEventListener("click", () => {
+    selectedRequestId = null;
+    renderMonthlyHistory();
+    showWorkflowTab(name);
+  }));
+  $(".workflow-tabs").addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? "requests" : event.key === "End" ? "revisions" : workflowTab === "requests" ? "revisions" : "requests";
+    selectedRequestId = null;
+    renderMonthlyHistory();
+    showWorkflowTab(next, true);
+  });
+  $("#budget-workflow-history").addEventListener("click", (event) => {
+    const revisionLink = event.target.closest("[data-open-revision]");
+    if (revisionLink) {
+      const number = Number(revisionLink.dataset.openRevision);
+      if (!currentBudget.revisions.some((revision) => revision.number === number && revision.requestId === revisionLink.dataset.revisionRequest)) return;
+      selectedRequestId = revisionLink.dataset.revisionRequest;
+      expandedRevisions = new Set([number]);
+      $("#workflow-revisions").innerHTML = revisionHistoryHtml(currentBudget, expandedRevisions);
+      renderWorkflowIter();
+      showWorkflowTab("revisions", true);
+      $("#budget-workflow-history").scrollIntoView({ block: "start" });
+      return;
+    }
+    const row = event.target.closest("[data-request-row]");
+    if (!row || event.target.closest("[data-workflow-action]")) return;
+    selectedRequestId = row.dataset.requestRow;
+    renderMonthlyHistory();
+  });
+  $("#monthly-history-list").addEventListener("keydown", (event) => {
+    if (!event.target.matches("tr[data-request-row]") || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    selectedRequestId = event.target.dataset.requestRow;
+    renderMonthlyHistory();
+    $("#request-detail").scrollIntoView({ block: "nearest" });
+  });
+  $("#workflow-revisions").addEventListener("toggle", (event) => {
+    const entry = event.target;
+    if (!entry.isConnected || !entry.matches("details[data-revision-number]")) return;
+    const number = Number(entry.dataset.revisionNumber);
+    if (entry.open) expandedRevisions.add(number);
+    else expandedRevisions.delete(number);
+  }, true);
   $("#capex-search").addEventListener("input", renderCapex);
   $("#create-budget").addEventListener("click", () => openEdit("new"));
   $("#back-management").addEventListener("click", () => showPage("management"));
@@ -1950,31 +2065,10 @@ import {
   };
   $("#add-l1").addEventListener("click", () => openPlanningForm("l1"));
   $("#add-l2").addEventListener("click", () => openPlanningForm("l2"));
-  const splitPercentage = (total, count) => {
-    const cents = Math.max(0, Math.round(Number(total || 0) * 100));
-    const base = Math.floor(cents / count);
-    const remainder = cents % count;
-    return Array.from(
-      { length: count },
-      (_, index) => (base + (index < remainder ? 1 : 0)) / 100,
-    );
-  };
   $("#distribute-l1").addEventListener("click", () => {
     if (!canEditBudget(currentBudget)) return;
     const planning = currentBudget.planning;
-    const levels = planning.level1;
-    if (!levels.length) return;
-    const percentages = splitPercentage(100, levels.length);
-    const totalCents = Math.round(planningBaseTotal(planning) * 100);
-    let allocatedCents = 0;
-    levels.forEach((level, index) => {
-      level.totalPercent = percentages[index];
-      const budgetCents = index === levels.length - 1
-        ? totalCents - allocatedCents
-        : Math.round(totalCents * percentages[index] / 100);
-      level.budget = budgetCents / 100;
-      allocatedCents += budgetCents;
-    });
+    if (!distributeLevel1Equally(planning)) return;
     resizeDescendantMonths(planning);
     renderAnalysis();
     persist();
@@ -1983,26 +2077,7 @@ import {
   $("#distribute-l2").addEventListener("click", () => {
     if (!canEditBudget(currentBudget)) return;
     const planning = currentBudget.planning;
-    let distributed = false;
-    planning.level1.forEach((parent) => {
-      const children = planning.level2.filter(
-        (level) => level.parentId === parent.id,
-      );
-      if (!children.length) return;
-      distributed = true;
-      const parentPercent = Number(
-        parent.totalPercent ?? (
-          planningBaseTotal(planning) > 0
-            ? Number(parent.budget || 0) / planningBaseTotal(planning) * 100
-            : 0
-        ),
-      );
-      const percentages = splitPercentage(parentPercent, children.length);
-      children.forEach((level, index) => {
-        level.totalPercent = percentages[index];
-      });
-    });
-    if (!distributed) {
+    if (!distributeLevel2Equally(planning)) {
       toast("Aggiungi prima almeno un elemento di Livello 2");
       return;
     }

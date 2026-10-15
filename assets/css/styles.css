@@ -681,11 +681,6 @@ tbody tr[data-select-monthly] {
   font-size: 11px;
   line-height: 1.3;
 }
-.monthly-history {
-  padding: 12px;
-  border-top: 1px solid var(--wg-line);
-}
-.monthly-history[hidden],
 #submit-monthly-adjustments[hidden] {
   display: none;
 }
@@ -704,10 +699,6 @@ tbody tr[data-select-monthly] {
 }
 .monthly-history-entry .table-wrap {
   margin: 10px;
-}
-.monthly-history-entry .history-changed {
-  background: var(--wg-orange-soft);
-  font-weight: 600;
 }
 
 .month-tabs {
@@ -1149,19 +1140,39 @@ tbody tr[data-select-monthly] {
 .official-badge { display: inline-block; background: #dceee3; color: #175338; border-radius: 4px; padding: 4px 8px; font-weight: 700; font-size: 12px; }
 .workflow-history { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); align-items: start; gap: 12px; margin-top: 12px; }
 .workflow-history > .panel { min-width: 0; }
-.workflow-history > .panel > details > summary { cursor: pointer; }
 .workflow-history-body { padding: 4px 10px; overflow-wrap: anywhere; }
 .workflow-history .workflow-events { padding-left: 18px; }
-.snapshot-grid td.variation-increase, .variation-legend .variation-increase { background: #e0f1e5; color: #1b5d35; }
-.snapshot-grid td.variation-decrease, .variation-legend .variation-decrease { background: #fbe4e2; color: #922e29; }
+#budget-workflow-history td.variation-increase, .variation-legend .variation-increase { background: #e0f1e5; color: #1b5d35; }
+#budget-workflow-history td.variation-decrease, .variation-legend .variation-decrease { background: #fbe4e2; color: #922e29; }
 .snapshot-grid td.variation-increase { box-shadow: inset 3px 0 #3e8957; }
 .snapshot-grid td.variation-decrease { box-shadow: inset 3px 0 #ba5149; }
 .variation-delta { display: block; margin-top: 3px; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .variation-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
 .variation-legend span { padding: 3px 6px; border-radius: 3px; }
-.request-card details { margin-top: 10px; }
-.request-card summary { cursor: pointer; padding: 6px 0; }
-.request-card { border: 1px solid #d8e1e9; border-radius: 5px; padding: 14px; margin: 12px 0; background: white; }
+.workflow-tabs { display: flex; border-bottom: 1px solid var(--wg-line); background: var(--wg-orange-soft); }
+.workflow-tabs button { padding: 11px 16px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #4b5969; cursor: pointer; font-weight: 600; }
+.workflow-tabs button[aria-selected="true"] { border-bottom-color: var(--wg-orange); color: var(--wg-orange-dark); background: white; }
+.workflow-tabs button:focus-visible { outline: 2px solid var(--wg-orange); outline-offset: -3px; }
+.request-filters { align-items: end; flex-wrap: wrap; }
+.request-filters .field { min-width: 125px; flex: 1 1 125px; }
+.request-filters .field.grow { flex: 2 1 180px; }
+.request-filters input, .request-filters select { width: 100%; min-width: 0; }
+.request-filter-message { margin: 0; padding: 0 11px 9px; color: var(--wg-muted); font-size: 12px; }
+.request-table td { vertical-align: top; }
+.request-number { min-width: 120px; max-width: 175px; overflow-wrap: anywhere; }
+.request-select { padding: 0; border: 0; background: transparent; color: #245773; cursor: pointer; font: inherit; text-align: left; text-decoration: underline; }
+.request-reason { min-width: 150px; max-width: 260px; white-space: normal; }
+.request-actions { min-width: 150px; }
+.request-actions .btn { margin: 0 3px 4px 0; }
+.request-table tr[data-request-row] { cursor: pointer; }
+#budget-workflow-history .request-table tr.request-selected > td { background: #fff0d9; }
+.request-table tr[data-request-row]:focus-visible { outline: 2px solid var(--wg-orange); outline-offset: -2px; }
+.request-detail { padding: 12px; border-top: 1px solid var(--wg-line); }
+.request-detail-heading { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.request-detail p { overflow-wrap: anywhere; }
+.iter-title { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
+.iter-context { overflow-wrap: anywhere; font-size: 12px; }
+.workflow-history [role="tabpanel"][hidden], .request-detail[hidden] { display: none; }
 .workflow-events { padding-left: 22px; line-height: 1.7; }
 #save-status { font-size: 12px; color: #285f40; max-width: 530px; }
 #save-status.save-error { color: #a12d25; }

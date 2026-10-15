@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   createBudgetPlanning,
   ensureBudgetPlanning,
+  distributeLevel1Equally,
+  distributeLevel2Equally,
   level2Budget,
   levelPercentOfTotal,
   planningAllYearsTotal,
@@ -289,4 +291,62 @@ test("il catalogo conserva il collegamento esplicito tra padre e figlio", () => 
   assert.equal(budget.planning.level1[0].code, "GRA000");
   assert.equal(budget.planning.level2[0].parentCode, "GRA000");
   assert.equal(budget.planning.catalog.level2[0].parentCode, "GRA000");
+});
+
+
+test("ripartizione equa dei figli conserva i centesimi dei padri senza sommare percentuali arrotondate", () => {
+  const amounts = [1985800, 1663107.5, 1413889.6, 895610, 3972592.9];
+  const counts = [4, 3, 3, 3, 9];
+  const totalBudget = 9931000;
+  const level1 = amounts.map((budget, index) => ({
+    id: `p${index}`, budget, totalPercent: budget / totalBudget * 100,
+  }));
+  const planning = { mode: "two-level", totalBudget, level1,
+    level2: level1.flatMap((parent, index) => Array.from({ length: counts[index] }, (_, child) => ({
+      id: `${parent.id}-${child}`, parentId: parent.id, totalPercent: 0, months: months(0),
+    }))),
+  };
+  const parentsBefore = structuredClone(level1);
+  // The previous calculation rounded each parent percentage before splitting it.
+  const oldPercentSum = level1.reduce((sum, parent) => sum + Math.round(parent.totalPercent * 100) / 100, 0);
+  assert.ok(Math.abs(oldPercentSum - 100.01) < 1e-8);
+  assert.equal(distributeLevel2Equally(planning), true);
+  assert.deepEqual(planning.level1, parentsBefore);
+  for (const parent of level1) {
+    const children = planning.level2.filter((level) => level.parentId === parent.id);
+    const cents = children.map((level) => Math.round(level2Budget(planning, level) * 100));
+    assert.equal(cents.reduce((sum, value) => sum + value, 0), Math.round(parent.budget * 100));
+    assert.ok(Math.max(...cents) - Math.min(...cents) <= 1);
+    children.forEach((level, index) => { level.months = months(cents[index] / 100); });
+  }
+  assert.equal(planning.totalBudget, totalBudget);
+  assert.equal(planningValidation(planning).valid, true);
+  assert.equal(planningValidation(JSON.parse(JSON.stringify(planning))).valid, true);
+});
+
+test("ripartizione equa del Livello 1 divide gli euro con al massimo un centesimo di differenza", () => {
+  const planning = { mode: "two-level", totalBudget: 9941000,
+    level1: [0, 1, 2].map((id) => ({ id, budget: id === 0 ? 9941000 : 0, totalPercent: id === 0 ? 100 : 0 })),
+    level2: [{ id: "child", parentId: 0, totalPercent: 100, months: months(9941000) }],
+  };
+  const childBefore = structuredClone(planning.level2);
+  assert.equal(distributeLevel1Equally(planning), true);
+  assert.deepEqual(planning.level1.map((level) => level.budget), [3313666.67, 3313666.67, 3313666.66]);
+  assert.equal(Math.round(planningTotal(planning) * 100), 994100000);
+  assert.equal(planningValidation(planning).allocationPercentError, false);
+  assert.deepEqual(planning.level2, childBefore);
+});
+
+test("ripartizione dei figli gestisce residui inferiori al numero di righe e conserva quadrature incomplete", () => {
+  const planning = { mode: "two-level", totalBudget: 1,
+    level1: [{ id: "p", budget: 0.01, totalPercent: 1 }],
+    level2: [0, 1, 2].map((id) => ({ id, parentId: "p", totalPercent: 0, months: months(0) })),
+  };
+  distributeLevel2Equally(planning);
+  assert.deepEqual(planning.level2.map((level) => level2Budget(planning, level)), [0.01, 0, 0]);
+  const validation = planningValidation(planning);
+  assert.equal(validation.level2AllocationErrors.length, 0);
+  assert.equal(validation.level2TotalPercentError, true);
+  assert.equal(validation.allocationPercentError, true);
+  assert.equal(validation.valid, false);
 });

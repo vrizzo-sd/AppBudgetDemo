@@ -241,6 +241,39 @@ export function levelPercentOfTotal(planning, amount) {
   return total ? (Number(amount || 0) / total) * 100 : 0;
 }
 
+function splitAmountEqually(amount, count) {
+  const cents = Math.round(Number(amount) * 100);
+  const base = Math.floor(cents / count);
+  const remainder = cents % count;
+  return Array.from({ length: count }, (_, index) =>
+    (base + (index < remainder ? 1 : 0)) / 100);
+}
+
+export function distributeLevel1Equally(planning) {
+  if (!planning.level1.length) return false;
+  const total = planningBaseTotal(planning);
+  const amounts = splitAmountEqually(total, planning.level1.length);
+  planning.level1.forEach((level, index) => {
+    level.budget = amounts[index];
+    level.totalPercent = total > 0 ? amounts[index] / total * 100 : 0;
+  });
+  return true;
+}
+
+export function distributeLevel2Equally(planning) {
+  let distributed = false;
+  planning.level1.forEach((parent) => {
+    const children = planning.level2.filter((level) => level.parentId === parent.id);
+    if (!children.length) return;
+    const amounts = splitAmountEqually(parent.budget, children.length);
+    children.forEach((level, index) => {
+      level.totalPercent = levelPercentOfTotal(planning, amounts[index]);
+    });
+    distributed = true;
+  });
+  return distributed;
+}
+
 export function planningValidation(planning) {
   const allocationPercent = planning.level1.reduce(
     (sum, level) => sum + Number(level.totalPercent ?? levelPercentOfTotal(planning, level.budget)),
