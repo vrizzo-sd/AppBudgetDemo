@@ -21,6 +21,8 @@ FILES = (
     "scripts/__init__.py",
     "scripts/create_developer_package.py",
     "scripts/init_normalized_db.py",
+    "scripts/budget_workflow_validation.py",
+    "scripts/erp_actuals.py",
     "tests/capex-plan.test.mjs",
 )
 

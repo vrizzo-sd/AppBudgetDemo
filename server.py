@@ -4,6 +4,7 @@ import json
 import hashlib
 import mimetypes
 import sqlite3
+import socket
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -12,6 +13,7 @@ from threading import RLock
 
 from scripts.init_normalized_db import build_database
 from scripts.budget_workflow_validation import validate_state
+from scripts.erp_actuals import seed_actuals, read_actuals
 
 
 ROOT = Path(__file__).resolve().parent
@@ -44,6 +46,9 @@ def initialize_database() -> None:
     with closing(connect()) as connection:
         with connection:
             connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            row = connection.execute("SELECT payload_json FROM mockup_state WHERE id = 1").fetchone()
+            if row is not None:
+                seed_actuals(connection, json.loads(row["payload_json"]))
     if read_state():
         sync_normalized_database()
 
@@ -110,6 +115,7 @@ def write_state(payload: dict) -> None:
             )
             # Build the query projection before committing the authoritative state.
             # A projection failure rolls the state transaction back.
+            seed_actuals(connection, payload)
             build_database(DB_PATH, NORMALIZED_DB_PATH, replace=True, state=payload)
 
 
@@ -117,6 +123,7 @@ def reset_state() -> None:
     with closing(connect()) as connection:
         with connection:
             connection.execute("DELETE FROM mockup_state WHERE id = 1")
+            connection.execute("DELETE FROM budget_actual")
 
 
 class BudgetHandler(BaseHTTPRequestHandler):
@@ -150,6 +157,20 @@ class BudgetHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "budgetId obbligatorio"})
                 return
             self.send_json(200, read_analysis_summary(budget_key))
+            return
+        if path == "/api/actuals":
+            budget_key = parse_qs(parsed.query).get("budgetId", [""])[0]
+            if not budget_key:
+                self.send_json(400, {"error": "budgetId obbligatorio"})
+                return
+            with STATE_LOCK:
+                budget = next((item for item in read_state().get("budgets", []) if item["id"] == budget_key), None)
+                if budget is None:
+                    self.send_json(404, {"error": "Budget non trovato"})
+                    return
+                with closing(connect()) as connection:
+                    actuals = read_actuals(connection, budget)
+            self.send_json(200, {"actuals": actuals, "source": "ERP_SIMULATO"})
             return
         if path == "/api/health":
             self.send_json(
@@ -238,18 +259,32 @@ class BudgetHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class BudgetHTTPServer(ThreadingHTTPServer):
+    def server_bind(self) -> None:
+        # On Windows SO_REUSEADDR allows multiple servers to bind the same port.
+        # Requests can then keep reaching an obsolete process after a restart.
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.allow_reuse_address = False
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main() -> None:
-    initialize_database()
-    server = ThreadingHTTPServer((HOST, PORT), BudgetHandler)
-    print("Mockup Budget Analitico Wingest")
-    print(f"Apri nel browser: http://{HOST}:{PORT}")
-    print(f"Database SQLite: {DB_PATH}")
-    print(f"Database SQL interrogabile: {NORMALIZED_DB_PATH}")
-    print("Premi CTRL+C per fermare il server.")
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        server = BudgetHTTPServer((HOST, PORT), BudgetHandler)
+    except OSError as error:
+        raise SystemExit(f"Impossibile avviare AppBudgetDemo su http://{HOST}:{PORT}: {error}. Se il server è già aperto, arrestalo con Ctrl+C e rilancia start.bat.") from error
+    try:
+        initialize_database()
+        print("Mockup Budget Analitico Wingest")
+        print(f"Apri nel browser: http://{HOST}:{PORT}")
+        print(f"Database SQLite: {DB_PATH}")
+        print(f"Database SQL interrogabile: {NORMALIZED_DB_PATH}")
+        print("Premi CTRL+C per fermare il server.")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
     finally:
         server.server_close()
         print("Server arrestato.")

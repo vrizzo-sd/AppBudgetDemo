@@ -10,6 +10,7 @@ import {
   statusClass,
 } from "./core/formatters.js";
 import { budgetRowsHtml } from "./components/budget-list.js";
+import { createVariancePage } from "./components/variance-page.js";
 import {
   hierarchyLevel1RowsHtml,
   hierarchyLevel2RowsHtml,
@@ -378,10 +379,11 @@ import {
     $$(".page").forEach((page) =>
       page.classList.toggle("active", page.id === `page-${name}`),
     );
-    $("#page-title").textContent =
-      name === "management"
-        ? "Gestione Budget Analitica"
-        : "Redazione Budget Analitica";
+    $("#page-title").textContent = {
+      management: "Gestione Budget Analitica",
+      analysis: "Redazione Budget Analitica",
+      variance: "Analisi scostamenti",
+    }[name];
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1557,7 +1559,7 @@ import {
       <div class="field"><label for="edit-frequency">Periodicità</label><select id="edit-frequency" name="frequency"><option>Annuale</option><option>Mensile</option><option>Trimestrale</option><option>Vita utile</option></select></div>
       <div class="field"><label for="edit-type">Tipo budget</label><select id="edit-type" name="budgetType" ${budget ? "disabled" : ""}><option>Ordinario</option><option>Investimento</option></select></div>
       <div class="field full"><label for="edit-associated-structure">Struttura analitica associata</label><select id="edit-associated-structure" name="associatedStructure"><option value="">Seleziona una struttura</option>${associatedStructures.map((structure) => `<option value="${structure}">${structure}</option>`).join("")}${legacyStructureOption}</select></div>
-      <div class="field"><label for="edit-state">Stato</label><select id="edit-state" name="state"><option>Attivo</option><option>Disattivo</option></select></div>
+      <div class="field legacy-budget-state" hidden><label for="edit-state">Stato operativo</label><select id="edit-state" name="state"><option>Attivo</option><option>Disattivo</option></select></div>
     `;
     $("#edit-associated-structure").value = associatedStructure;
     if (budget) {
@@ -1804,6 +1806,8 @@ import {
   }
 
   $("#budget-list").addEventListener("click", (event) => {
+    const openVariance = event.target.closest("[data-open-variance]");
+    if (openVariance) { variancePage.open(openVariance.dataset.openVariance); return; }
     const editBudget = event.target.closest("[data-edit-budget]");
     const copy = event.target.closest("[data-copy-budget]");
     const openBudget = event.target.closest("[data-open-budget]");
@@ -2645,6 +2649,8 @@ import {
       closeRedistribution();
     }
   });
+  const variancePage = createVariancePage(() => budgets, showPage);
+  $("#open-variance").addEventListener("click", () => variancePage.open());
   renderBudgets();
   hydrateFromServer();
 })();

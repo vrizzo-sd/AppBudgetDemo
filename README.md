@@ -38,6 +38,8 @@ La porta `8793` è dedicata alla versione modulare aggiornata. Eventuali vecchi 
 
 In alternativa, su Windows fare doppio clic su `start.bat`.
 
+Il server riserva la porta in modo esclusivo su Windows: una seconda istanza sulla stessa porta viene bloccata con un messaggio esplicito. Per aggiornamenti al codice Python, arrestare la precedente istanza con Ctrl+C e riavviare `start.bat`; ricaricare la pagina da solo aggiorna il frontend, ma non le API già caricate dal server.
+
 ## Pacchetto da consegnare allo sviluppatore
 
 Il file pronto da copiare o condividere è `dist/Mockup_Budget_Analitico_Wingest_sviluppatore.zip`. Estrarlo, aprire la cartella estratta in VS Code e avviare `start.bat` oppure `python server.py`. Aprire la pagina una volta per generare i dati demo. In SQLTools creare poi una connessione SQLite al file `data/budget_wingest.db` della cartella estratta e provare `query_esempio.sql`. Lo schema completo è `schema_normalizzato.sql`, il modello concettuale e le regole sono in `docs/SPECIFICA_SVILUPPATORE_BUDGET_WINGEST.md` e `docs/ARCHITETTURA_DATABASE.md`.
@@ -59,13 +61,23 @@ Lo ZIP esclude i database locali di lavoro. Per rigenerarlo dopo modifiche al mo
 
 I componenti sono funzioni JavaScript pure: ricevono dati e restituiscono HTML. `app.js` conserva le regole applicative e collega pulsanti, filtri, popup e persistenza.
 
-Nella schermata **Gestione Budget** ogni riga rappresenta una versione del budget. Le precedenti righe bianche di dettaglio e il comando **Aggiungere voci** non sono più esposti: la gestione avviene tramite versioning. **Copia** duplica il budget assegnandogli il numero di versione successivo e lo imposta inizialmente come `Disattivo`; **Elimina** richiede una conferma e non permette di rimuovere l’ultimo budget rimasto. Gli unici stati dell’intestazione sono `Attivo`, con l’intera riga verde, e `Disattivo`, con l’intera riga grigia. La colonna **Struttura analitica associata** parte vuota; nel modulo resta un campo testuale libero, senza selezione vincolata a CDC o commessa.
+Nella schermata **Gestione Budget** ogni riga rappresenta una versione del budget. Le precedenti righe bianche di dettaglio e il comando **Aggiungere voci** non sono più esposti: la gestione avviene tramite versioning. **Copia** genera una nuova bozza non ufficiale; **Elimina** richiede una conferma e rispetta le protezioni dei budget approvati. Una sola colonna **Stato** mostra `Bozza`, `In approvazione`, `Approvato` o `Respinto`, insieme all'eventuale badge **Ufficiale**. Il filtro Stato segue l'iter; le righe ufficiali sono verdi, le altre grigie. Il flag legacy Attivo/Disattivo resta conservato nei dati, ma non è più esposto nella Gestione né nel modulo dell'intestazione. La struttura analitica associata conserva il proprio selettore configurato.
 
 La nuova **Redazione Budget Analitica** usa tre tabelle collegate. Per l'ordinario, il Livello 1 contiene il budget inserito dall'utente; il Livello 2 appartiene esplicitamente a un padre e il suo budget è calcolato dalla percentuale sul padre. Sono mostrate sia la percentuale sul padre sia quella sul totale generale. La pianificazione mensile contiene una riga per ogni elemento di Livello 2. Se la somma dei mesi non coincide con il budget calcolato, la riga diventa rossa e il salvataggio viene bloccato. Cambiando il budget del padre si ricalcolano i figli, ma non i mesi.
 
 **Ripartisci equamente** divide gli importi al centesimo: nel Livello 1 ripartisce il totale del budget, nel Livello 2 ripartisce il budget di ciascun padre fra i suoi figli. Le percentuali si ricavano dagli importi senza arrotondamenti intermedi; le quote differiscono al massimo di un centesimo. Il comando del Livello 2 conserva gli importi dei padri.
 
 Nella tabella 3, **Rettifica** mostra le celle mensili delle variazioni sulla versione ufficiale approvata. Le colonne `Rett.` contengono la variazione cumulata rispetto al budget iniziale, con importi italiani (es. `1.000,50`). **Salva / invia rettifica** apre il box con motivazione obbligatoria: puoi salvare una bozza oppure inviare in approvazione. **Rettifiche** apre la scheda omonima sotto la tabella 3: una tabella compatta consente ricerca, filtri per stato e date, lettura, modifica ed eliminazione delle bozze, invio, ritiro, approvazione e rifiuto motivato. Selezionando una richiesta vengono mostrate solo le righe variate, con voce, anno, mese, importo precedente, variazione e importo proposto. La tabella mensile completa si consulta nelle Revisioni; l’iter della richiesta compare nel pannello a destra. Una richiesta approvata collega direttamente la revisione che ha generato. Le celle con richieste pendenti sono bloccate. Una richiesta può includere più celle, anche con variazione complessiva zero per uno spostamento tra mesi o voci. Solo l'approvazione cambia i totali ufficiali e crea una revisione immutabile, una per richiesta.
+
+## Analisi scostamenti
+
+Da Gestione Budget, **Analisi scostamenti** apre una pagina separata dalla Redazione, in sola lettura. Il comando sulla singola versione apre direttamente quel confronto. Occorre almeno una versione approvata: le bozze non vengono approvate automaticamente per alimentare l'analisi.
+
+Seleziona budget, versione, revisione approvata e mesi Dal/Al. Una sola tabella espandibile mostra totale budget, livelli e righe pianificate, con budget iniziale, rettifiche approvate fino alla revisione scelta, aggiornato, consuntivo, scostamento € e %. Il consuntivo legge **importi demo casuali e persistenti nel database**, simulando un dato ricevuto dall'ERP. Il campo `budget_actual.actual_amount_cents` in `data/budget_mockup.db` conserva l'importo mensile in centesimi. L'avvio e i salvataggi popolano solo i mesi mancanti di tutti i budget, comprese bozze e versioni personalizzate; le copie con gli stessi codici condividono il medesimo consuntivo. I valori non cambiano ricaricando la pagina o rigenerando la proiezione SQL. La pagina usa `GET /api/actuals?budgetId=...`; non contiene più importi consuntivi precalcolati nel JavaScript. Periodi senza dati mostrano `—`, anche nei totali che altrimenti sarebbero parziali.
+
+Lo scostamento è `consuntivo − aggiornato` e la percentuale è `scostamento / aggiornato × 100`; con aggiornato zero la percentuale è `—`. Non ci sono nature costo/ricavo, colori o giudizi. Dettaglio registrazioni, impegni e disponibilità non sono ancora inclusi. La base è quella della versione selezionata; l'aggiornato è la fotografia della revisione scelta, senza rettifiche successive. Vedi la sezione 2.4 della specifica per il perimetro completo.
+
+Sotto la tabella, due grafici compatti seguono gli stessi filtri applicati: confronto a barre tra aggiornato e consuntivo per tutte le voci pianificate, e andamento mensile del totale con due linee. Sono affiancati sugli schermi ampi, con area grafica di 200 px e scorrimento interno per molte voci; sui pannelli stretti si dispongono in verticale. Le serie sono distinte anche per tratto e posizione; puntatore e tastiera permettono di leggere gli importi esatti. I dati mancanti sono segnalati e interrompono la linea, senza essere sostituiti con zero. I grafici usano i calcoli della tabella e i consuntivi simulati già memorizzati nel database.
 
 ## Versioni, approvazioni e revisioni
 
@@ -106,7 +118,7 @@ La specifica per lo sviluppatore Wingest è in `docs/SPECIFICA_SVILUPPATORE_BUDG
 
 ## SQLite
 
-Il database contiene una tabella intenzionalmente molto piccola, `mockup_state`, che conserva lo stato completo del prototipo in JSON. È una scelta adatta al mockup perché rende semplice cambiare il modello durante la progettazione.
+Il database principale `budget_mockup.db` contiene `mockup_state`, che conserva lo stato completo del budget in JSON, e `budget_actual`, che conserva gli importi consuntivi mensili simulati nel campo `actual_amount_cents`. Questi ultimi sono separati dalle basi e dalle revisioni approvate. Il JSON rende semplice cambiare il modello del budget durante la progettazione.
 
 Il file `data/budget_wingest.db` è invece il database relazionale interrogabile con SQLTools. Il server lo rigenera automaticamente a partire dallo stato corrente dopo ogni salvataggio della pagina. In questo modo budget, livelli, voci, valori mensili, rettifiche, commesse e componenti CAPEX restano visibili anche tramite query SQL.
 

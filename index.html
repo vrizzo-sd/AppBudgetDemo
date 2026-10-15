@@ -30,9 +30,10 @@
           <div class="field"><label for="filter-from">Dal</label><input id="filter-from" type="date" value="2027-01-01"></div>
           <div class="field"><label for="filter-to">Al</label><input id="filter-to" type="date" value="2027-12-31"></div>
           <div class="field grow"><label for="filter-structure">Struttura analitica</label><select id="filter-structure"><option value="all">Tutte</option><option>Grana</option><option>Tradizionali</option><option>Siero</option><option>Burro</option><option>Staff</option><option>Investimenti</option></select></div>
-          <div class="field"><label for="filter-status">Stato</label><select id="filter-status"><option value="all">Tutti</option><option>Attivo</option><option>Disattivo</option></select></div>
+          <div class="field"><label for="filter-status">Stato</label><select id="filter-status"><option value="all">Tutti</option><option>Bozza</option><option>In approvazione</option><option>Approvato</option><option>Respinto</option></select></div>
           <button class="btn blue" type="button" id="apply-filters">Applica filtri</button>
           <button class="btn primary" type="button" id="create-budget">＋ Crea BDG</button>
+          <button class="btn blue" type="button" id="open-variance">Analisi scostamenti</button>
         </div>
 
         <div class="section-head">
@@ -46,12 +47,40 @@
         <div class="table-wrap">
           <table aria-label="Gestione budget analitici">
             <thead>
-              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Struttura analitica associata</th><th>Stato</th><th>Iter / Ufficiale</th><th>Azioni</th></tr>
+              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Struttura analitica associata</th><th>Stato</th><th>Azioni</th></tr>
             </thead>
             <tbody id="budget-list"></tbody>
           </table>
         </div>
         <div class="investment-note"><strong>Regola proposta:</strong> ogni budget usa la struttura analitica associata; per gli investimenti la commessa espone un unico livello di righe di budget.</div>
+      </section>
+
+      <section class="page" id="page-variance" aria-labelledby="page-title">
+        <div class="analysis-strip">
+          <button class="btn" type="button" id="variance-back">← Torna a Gestione BDG</button>
+          <strong>Confronto con il consuntivo</strong><span class="muted">Sola lettura · revisioni approvate</span>
+        </div>
+        <form class="toolbar variance-filters" id="variance-filters">
+          <div class="field grow"><label for="variance-budget">Budget</label><select id="variance-budget"></select></div>
+          <div class="field"><label for="variance-version">Versione</label><select id="variance-version"></select></div>
+          <div class="field"><label for="variance-revision">Revisione approvata</label><select id="variance-revision"></select></div>
+          <div class="field"><label for="variance-from">Dal mese</label><input id="variance-from" type="month" required></div>
+          <div class="field"><label for="variance-to">Al mese</label><input id="variance-to" type="month" required></div>
+          <button class="btn blue" type="submit" id="variance-apply">Applica periodo</button>
+        </form>
+        <p class="variance-demo-note">Consuntivi ERP simulati: importi mensili casuali salvati nel database e già aggregati. I valori restano stabili dopo il caricamento.</p>
+        <p id="variance-context" class="muted"></p>
+        <p id="variance-message" role="status" aria-live="polite"></p>
+        <section class="panel">
+          <div class="panel-title variance-table-title"><span>Budget e consuntivo</span><div class="spacer"></div><button class="btn small" type="button" id="variance-expand">Espandi tutto</button><button class="btn small" type="button" id="variance-collapse">Comprimi tutto</button></div>
+          <div class="table-wrap"><table class="variance-table" aria-label="Analisi scostamenti per gerarchia di budget">
+            <thead><tr><th>Struttura / voce</th><th class="num">Budget iniziale</th><th class="num">Rettifiche approvate</th><th class="num">Budget aggiornato</th><th class="num">Consuntivo</th><th class="num">Scostamento €</th><th class="num">Scostamento %</th></tr></thead>
+            <tbody id="variance-rows"></tbody>
+          </table></div>
+        </section>
+        <section id="variance-charts" class="variance-charts" aria-label="Grafici di budget e consuntivo" hidden></section>
+        <p class="muted variance-footnote">Scostamento = consuntivo − budget aggiornato. Percentuale = scostamento / budget aggiornato × 100; con aggiornato zero: —. Gli scostamenti sono espressi con segno.</p>
+        <p class="muted variance-footnote">Il budget iniziale è la base della versione selezionata. — indica un consuntivo non disponibile o una percentuale non calcolabile. Dettaglio registrazioni, impegni e disponibilità non sono ancora inclusi.</p>
       </section>
 
       <section class="page" id="page-analysis" aria-labelledby="page-title">

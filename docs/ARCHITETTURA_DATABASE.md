@@ -2,7 +2,9 @@
 
 ## 1. Situazione del mockup
 
-Il prototipo conserva lo stato modificabile della pagina come JSON nella tabella `mockup_state` di `data/budget_mockup.db`. Dopo ogni salvataggio, il server aggiorna anche `data/budget_wingest.db`, con tabelle relazionali interrogabili da SQLTools.
+Il prototipo conserva lo stato modificabile della pagina come JSON nella tabella `mockup_state` di `data/budget_mockup.db`. Lo stesso database principale contiene anche `budget_actual`: il campo `actual_amount_cents` conserva gli importi mensili aggregati che simulano l'ingresso ERP, con provenienza `ERP_SIMULATO`. Il popolamento automatico aggiunge solo le combinazioni mancanti per famiglia del budget, codice voce, anno e mese; le versioni della stessa famiglia condividono gli stessi consuntivi. Sono dati separati dal budget e dalle sue revisioni, consultabili tramite `GET /api/actuals?budgetId=...`.
+
+Dopo ogni salvataggio, il server aggiorna anche `data/budget_wingest.db`, con tabelle relazionali interrogabili da SQLTools. Questa rigenerazione non cancella i consuntivi conservati nel database principale.
 Il primo file facilita le modifiche rapide del mockup; il secondo rende consultabili budget, livelli, voci, valori mensili, rettifiche e CAPEX.
 
 **Aggiornamento del mockup 29/09/2026.** La pagina corrente persiste nel JSON anche `budget.planning`: catalogo degli elementi configurati, righe di Livello 1, righe di Livello 2 con riferimento esplicito al padre, percentuale sul padre, dodici valori mensili e stato di presenza della pianificazione. La proiezione relazionale descritta sotto è precedente al nuovo disegno e deve essere aggiornata prima di essere considerata uno schema definitivo.

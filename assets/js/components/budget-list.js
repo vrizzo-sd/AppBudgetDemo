@@ -16,7 +16,7 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
       budget.name.toLowerCase().includes(structure.toLowerCase()) ||
       normalized(associatedStructure).includes(normalized(structure)) ||
       (structure === "Investimenti" && budget.type === "Investimento");
-    const matchesStatus = status === "all" || budget.state === status;
+    const matchesStatus = status === "all" || (budget.workflowState || "Bozza") === status;
     const searchableBudget = [
       budget.year,
       budget.name,
@@ -24,9 +24,8 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
       budget.frequency,
       budget.revision,
       associatedStructure,
-      budget.state,
       budget.type,
-      budget.workflowState,
+      budget.workflowState || "Bozza",
       budget.isOfficial ? "Ufficiale" : "",
     ];
     const matchesSearch =
@@ -36,17 +35,17 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
   });
 
   if (!filtered.length) {
-    return '<tr><td colspan="9" class="center muted">Nessun budget corrisponde ai filtri.</td></tr>';
+    return '<tr><td colspan="8" class="center muted">Nessun budget corrisponde ai filtri.</td></tr>';
   }
 
   return filtered
     .map((budget) => {
       const associatedStructure = budget.associatedStructure || "";
       return `
-    <tr class="budget-row ${budget.state === "Disattivo" ? "budget-row-inactive" : "budget-row-active"}">
-      <td>${budget.year}</td><td>${escapeHtml(budget.name)}</td><td>${budget.version}</td><td>${escapeHtml(budget.frequency)}</td><td>${budget.revision}</td><td>${escapeHtml(associatedStructure)}</td><td><span class="status ${statusClass(budget.state)}">${escapeHtml(budget.state)}</span></td>
+    <tr class="budget-row ${budget.isOfficial ? "budget-row-active" : "budget-row-inactive"}">
+      <td>${budget.year}</td><td>${escapeHtml(budget.name)}</td><td>${budget.version}</td><td>${escapeHtml(budget.frequency)}</td><td>${budget.revision}</td><td>${escapeHtml(associatedStructure)}</td>
       <td><span class="status ${statusClass(budget.workflowState || "Bozza")}">${escapeHtml(budget.workflowState || "Bozza")}</span>${budget.isOfficial ? '<span class="official-badge">Ufficiale</span>' : ""}</td>
-      <td class="budget-actions"><button class="action-icon" type="button" aria-label="Modifica ${escapeHtml(budget.name)}, versione ${budget.version}" title="Modifica bozza" data-edit-budget="${budget.id}" ${budget.workflowState !== "Bozza" ? "disabled" : ""}>✎</button> <button class="action-icon" type="button" aria-label="Copia ${escapeHtml(budget.name)}, versione ${budget.version}" title="Nuova versione" data-copy-budget="${budget.id}">⧉</button> <button class="action-icon danger" type="button" aria-label="Elimina ${escapeHtml(budget.name)}, versione ${budget.version}" title="Elimina bozza" data-delete-budget="${budget.id}" ${budget.workflowState !== "Bozza" ? "disabled" : ""}>🗑</button> <button class="btn small blue" type="button" data-open-budget="${budget.id}">Apri analisi</button></td>
+      <td class="budget-actions"><button class="action-icon" type="button" aria-label="Modifica ${escapeHtml(budget.name)}, versione ${budget.version}" title="Modifica bozza" data-edit-budget="${budget.id}" ${budget.workflowState !== "Bozza" ? "disabled" : ""}>✎</button> <button class="action-icon" type="button" aria-label="Copia ${escapeHtml(budget.name)}, versione ${budget.version}" title="Nuova versione" data-copy-budget="${budget.id}">⧉</button> <button class="action-icon danger" type="button" aria-label="Elimina ${escapeHtml(budget.name)}, versione ${budget.version}" title="Elimina bozza" data-delete-budget="${budget.id}" ${budget.workflowState !== "Bozza" ? "disabled" : ""}>🗑</button> <button class="btn small blue" type="button" data-open-budget="${budget.id}">Redazione</button> <button class="btn small" type="button" data-open-variance="${escapeHtml(budget.id)}" ${budget.workflowState !== "Approvato" || !budget.revisions?.length ? 'disabled title="Disponibile dopo l’approvazione del budget"' : ""}>Scostamenti</button></td>
     </tr>
   `;
     })
