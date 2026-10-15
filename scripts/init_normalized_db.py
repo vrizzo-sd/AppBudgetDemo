@@ -343,11 +343,12 @@ def insert_adjustments(
             )
 
 
-def build_database(source: Path, target: Path, replace: bool) -> None:
+def build_database(source: Path, target: Path, replace: bool, state: dict | None = None) -> None:
     if target.exists() and not replace:
         raise FileExistsError(f"Il database esiste già: {target}. Usa --replace per rigenerarlo.")
 
-    state = read_mockup_state(source)
+    if state is None:
+        state = read_mockup_state(source)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = tempfile.NamedTemporaryFile(prefix="budget_wingest_", suffix=".db", dir=target.parent, delete=False)
     temporary_path = Path(temporary.name)

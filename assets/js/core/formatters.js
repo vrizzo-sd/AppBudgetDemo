@@ -65,7 +65,7 @@ export function statusClass(status) {
     return "approved";
   if (status === "Creato") return "created";
   if (String(status).includes("approvazione")) return "pending";
-  if (status === "Respinta") return "rejected";
+  if (["Respinta", "Respinto"].includes(status)) return "rejected";
   return "draft";
 }
 

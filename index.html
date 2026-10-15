@@ -19,8 +19,7 @@
     <div class="titlebar">
       <h1 id="page-title">Gestione Budget Analitica</h1>
       <div class="context">
-        <select aria-label="Esercizio"><option>2027</option><option>2026</option></select>
-        <select aria-label="Versione"><option>Versione 1</option><option>Versione precedente</option></select>
+        <span id="save-status" role="status">Caricamento dati…</span>
         <span class="demo-badge">MOCKUP FUNZIONALE · DATI DEMO</span>
       </div>
     </div>
@@ -47,7 +46,7 @@
         <div class="table-wrap">
           <table aria-label="Gestione budget analitici">
             <thead>
-              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Struttura analitica associata</th><th>Stato</th><th>Azioni</th></tr>
+              <tr><th>Anno</th><th>Nome budget</th><th>Versione</th><th>Periodicità</th><th>Revisione</th><th>Struttura analitica associata</th><th>Stato</th><th>Iter / Ufficiale</th><th>Azioni</th></tr>
             </thead>
             <tbody id="budget-list"></tbody>
           </table>
@@ -64,9 +63,10 @@
           <span class="status active" id="analysis-status">Attivo</span>
           <div class="spacer"></div>
           <button class="btn" type="button" id="open-adjustments" hidden>Rettifiche <span id="adjustment-count">(2)</span></button>
-          <button class="btn primary" type="button" id="save-analysis">Salva analisi</button>
+          <button class="btn primary" type="button" id="save-analysis">Salva bozza</button>
         </div>
 
+        <section class="panel workflow-panel" id="budget-workflow-panel" aria-label="Versione, revisione e approvazione"></section>
         <div id="economic-panel">
           <div class="toolbar">
             <div class="field"><label for="analysis-type">Tipo budget</label><select id="analysis-type" disabled><option value="Ordinario">Ordinario</option><option value="Investimento">Investimento</option></select></div>
@@ -105,11 +105,12 @@
                 <button class="btn primary small" type="button" id="add-monthly">＋ Aggiungi</button>
                 <button class="btn small" type="button" id="toggle-monthly-adjustments" aria-expanded="false">Rettifica</button>
                 <button class="btn small primary" type="button" id="submit-monthly-adjustments" hidden>Invia rettifica</button>
-                <button class="btn small" type="button" id="show-monthly-history" aria-expanded="false">Storico</button>
+                <button class="btn small" type="button" id="cancel-request-edit" hidden>Annulla modifica rettifica</button>
+                <button class="btn small" type="button" id="show-monthly-history" aria-expanded="false">Rettifiche e storico</button>
                 <button type="button" id="new-voice" hidden>Nuova voce</button>
                 <span class="total-chip" id="grand-total">TOTALE BUDGET: 0 €</span>
               </div>
-              <p id="adjustment-help" class="adjustment-help" hidden>Modifica gli importi nelle colonne «Rett.» usando la virgola per i centesimi (es. 1.000,50), poi scegli «Invia rettifica». Le richieste inviate restano in approvazione.</p>
+              <p id="adjustment-help" class="adjustment-help" hidden>Le colonne «Rett.» indicano la variazione cumulata rispetto al budget iniziale. Inserisci importi con segno e virgola per i centesimi (es. 1.000,50), poi scegli «Salva / invia rettifica». Le bozze e le richieste in attesa non cambiano i valori ufficiali.</p>
               <div class="table-filter-bar compact">
                 <label for="monthly-search">Cerca</label>
                 <input class="table-search" id="monthly-search" type="search" placeholder="Codice o descrizione…" autocomplete="off">
@@ -123,9 +124,10 @@
                   <tfoot id="monthly-foot"></tfoot>
                 </table>
               </div>
-              <div id="monthly-history" class="monthly-history" hidden></div>
+              <div id="monthly-history" class="monthly-history" hidden><div class="table-filter-bar"><label for="request-search">Cerca rettifiche</label><input id="request-search" type="search" placeholder="Motivazione, stato, anno o numero…"></div><div id="monthly-history-list"></div></div>
             </section>
           </div>
+          <div class="workflow-history" id="budget-workflow-history" aria-label="Storico revisioni e iter del budget"></div>
         </div>
 
         <section id="capex-panel" class="panel investment-details" hidden aria-label="Dettaglio investimento">
@@ -184,11 +186,24 @@
             <div class="full" id="adjustment-reason-summary"></div>
             <div class="field full"><label for="adjustment-reason">Motivazione della rettifica</label><textarea id="adjustment-reason" required maxlength="2000" placeholder="Spiega perché chiedi questa variazione"></textarea></div>
           </div>
-          <div class="modal-foot"><button class="btn" type="button" id="cancel-adjustment-reason">Annulla</button><button class="btn primary" type="submit">Invia in approvazione</button></div>
+          <div class="modal-foot"><button class="btn" type="button" id="cancel-adjustment-reason">Annulla</button><button class="btn" type="submit" value="draft">Salva bozza</button><button class="btn primary" type="submit" value="submit">Invia in approvazione</button></div>
         </form>
       </div>
     </div>
 
+    <div class="modal-backdrop" id="workflow-note-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="workflow-note-title"><form id="workflow-note-form">
+        <div class="modal-head"><h2 id="workflow-note-title">Motiva il rifiuto</h2></div><div class="modal-body"><div class="field full"><label for="workflow-note">Motivazione obbligatoria</label><textarea id="workflow-note" required maxlength="2000"></textarea></div></div>
+        <div class="modal-foot"><button class="btn" type="button" id="cancel-workflow-note">Annulla</button><button class="btn primary" type="submit">Conferma rifiuto</button></div>
+      </form></div>
+    </div>
+    <div class="modal-backdrop" id="workflow-confirm-modal" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="workflow-confirm-title"><form id="workflow-confirm-form">
+        <div class="modal-head"><h2 id="workflow-confirm-title">Conferma eliminazione</h2></div>
+        <div class="modal-body"><p class="full" id="workflow-confirm-message"></p></div>
+        <div class="modal-foot"><button class="btn" type="button" id="cancel-workflow-confirm">Annulla</button><button class="btn primary" type="submit">Elimina bozza / elemento</button></div>
+      </form></div>
+    </div>
     <div class="modal-backdrop" id="planning-modal" aria-hidden="true">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="planning-modal-title">
         <div class="modal-head"><h2 id="planning-modal-title">Elemento budget</h2><div class="spacer"></div><button class="btn small" type="button" id="close-planning-modal">Chiudi</button></div>

@@ -26,6 +26,8 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
       associatedStructure,
       budget.state,
       budget.type,
+      budget.workflowState,
+      budget.isOfficial ? "Ufficiale" : "",
     ];
     const matchesSearch =
       !searchTerm ||
@@ -34,7 +36,7 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
   });
 
   if (!filtered.length) {
-    return '<tr><td colspan="8" class="center muted">Nessun budget corrisponde ai filtri.</td></tr>';
+    return '<tr><td colspan="9" class="center muted">Nessun budget corrisponde ai filtri.</td></tr>';
   }
 
   return filtered
@@ -43,7 +45,8 @@ export function budgetRowsHtml(budgets, structure, status, search = "") {
       return `
     <tr class="budget-row ${budget.state === "Disattivo" ? "budget-row-inactive" : "budget-row-active"}">
       <td>${budget.year}</td><td>${escapeHtml(budget.name)}</td><td>${budget.version}</td><td>${escapeHtml(budget.frequency)}</td><td>${budget.revision}</td><td>${escapeHtml(associatedStructure)}</td><td><span class="status ${statusClass(budget.state)}">${escapeHtml(budget.state)}</span></td>
-      <td class="budget-actions"><button class="action-icon" type="button" aria-label="Modifica ${escapeHtml(budget.name)}, versione ${budget.version}" title="Modifica" data-edit-budget="${budget.id}">✎</button> <button class="action-icon" type="button" aria-label="Copia ${escapeHtml(budget.name)}, versione ${budget.version}" title="Copia" data-copy-budget="${budget.id}">⧉</button> <button class="action-icon danger" type="button" aria-label="Elimina ${escapeHtml(budget.name)}, versione ${budget.version}" title="Elimina" data-delete-budget="${budget.id}">🗑</button> <button class="btn small blue" type="button" data-open-budget="${budget.id}">Apri analisi</button></td>
+      <td><span class="status ${statusClass(budget.workflowState || "Bozza")}">${escapeHtml(budget.workflowState || "Bozza")}</span>${budget.isOfficial ? '<span class="official-badge">Ufficiale</span>' : ""}</td>
+      <td class="budget-actions"><button class="action-icon" type="button" aria-label="Modifica ${escapeHtml(budget.name)}, versione ${budget.version}" title="Modifica bozza" data-edit-budget="${budget.id}" ${budget.workflowState !== "Bozza" ? "disabled" : ""}>✎</button> <button class="action-icon" type="button" aria-label="Copia ${escapeHtml(budget.name)}, versione ${budget.version}" title="Nuova versione" data-copy-budget="${budget.id}">⧉</button> <button class="action-icon danger" type="button" aria-label="Elimina ${escapeHtml(budget.name)}, versione ${budget.version}" title="Elimina bozza" data-delete-budget="${budget.id}" ${budget.workflowState !== "Bozza" ? "disabled" : ""}>🗑</button> <button class="btn small blue" type="button" data-open-budget="${budget.id}">Apri analisi</button></td>
     </tr>
   `;
     })

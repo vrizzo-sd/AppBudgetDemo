@@ -48,6 +48,9 @@ import {
   generateInstallments,
   scheduleTotals,
 } from "./core/capex-plan.js";
+import { ACTOR, canEditBudget, initializeWorkflow, effectivePlanning, transitionBudget,
+  validateRequest, requestRecords, transitionRequest, approvedDelta } from "./core/budget-workflow.js";
+import { workflowPanelHtml, workflowHistoryHtml, requestHistoryHtml } from "./components/budget-workflow-panel.js";
 import { copyBudgetWithNextVersion } from "./core/budget-versioning.js";
 import {
   capexComponentsDefault,
@@ -106,6 +109,11 @@ import {
   let monthlyAdjustmentsVisible = false;
   let monthlyHistory = load("wg-mockup-monthly-history", []);
   const adjustmentDrafts = new Map();
+  let editingRequestId = null;
+  let workflowNoteContext = null;
+  let confirmationResolver = null;
+  let saveQueue = Promise.resolve(true);
+  let workflowBusy = false;
   let selectedLevel1Ids = new Set();
   let selectedLevel2Ids = new Set();
   let selectedMonthlyIds = new Set();
@@ -113,7 +121,7 @@ import {
   let editingLevel2Ids = new Set();
   let editingMonthlyIds = new Set();
   let apiAvailable = false;
-  let apiSaveTimer = null;
+  let serverToken = null;
   let stateVersion = 0;
 
   function normalizeBudgetStates() {
@@ -232,7 +240,7 @@ import {
         });
       });
     budgets
-      .filter((budget) => budget.type === "Ordinario")
+      .filter((budget) => budget.type === "Ordinario" && (!budget.workflowState || canEditBudget(budget)))
       .forEach((budget) => {
         budget.planning.catalog = {
           level1: [...level1Catalog.values()].map(clone),
@@ -241,6 +249,7 @@ import {
       });
   }
   ensureAllBudgetPlanning();
+  initializeWorkflow(budgets, monthlyHistory, adjustments);
 
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -252,59 +261,76 @@ import {
       return clone(fallback);
     }
   }
+  function statePayload() {
+    return { budgets, adjustments, monthlyHistory, capexComponents, ordinaryRows, investmentRows };
+  }
+  function cacheWorkflow() {
+    localStorage.setItem("wg-mockup-budgets", JSON.stringify(budgets));
+    localStorage.setItem("wg-mockup-adjustments", JSON.stringify(adjustments));
+    localStorage.setItem("wg-mockup-monthly-history", JSON.stringify(monthlyHistory));
+  }
+  function captureWorkflow() {
+    return clone({ budgets, adjustments, monthlyHistory, drafts: [...adjustmentDrafts], editingRequestId });
+  }
+  function restoreWorkflow(previous) {
+    const id = currentBudget.id;
+    ({ budgets, adjustments, monthlyHistory, editingRequestId } = previous);
+    adjustmentDrafts.clear();
+    previous.drafts.forEach(([key, value]) => adjustmentDrafts.set(key, value));
+    currentBudget = budgets.find((item) => item.id === id) || budgets[0];
+    currentChild = currentBudget.children[0];
+    try { cacheWorkflow(); } catch { /* The failed save is already displayed. */ }
+    renderBudgets();
+    renderAnalysis();
+  }
+  function saveStatus(message, error = false) {
+    $("#save-status").textContent = message;
+    $("#save-status").classList.toggle("save-error", error);
+  }
   function persist() {
     const version = ++stateVersion;
+    const payload = clone(statePayload());
     try {
-      localStorage.setItem("wg-mockup-budgets", JSON.stringify(budgets));
-      localStorage.setItem(
-        "wg-mockup-adjustments",
-        JSON.stringify(adjustments),
-      );
-      localStorage.setItem("wg-mockup-monthly-history", JSON.stringify(monthlyHistory));
-      localStorage.setItem("wg-mockup-capex", JSON.stringify(capexComponents));
-      localStorage.setItem(
-        "wg-mockup-ordinary-rows",
-        JSON.stringify(ordinaryRows),
-      );
-      localStorage.setItem(
-        "wg-mockup-investment-rows",
-        JSON.stringify(investmentRows),
-      );
-    } catch {}
-    if (apiAvailable) {
-      clearTimeout(apiSaveTimer);
-      apiSaveTimer = setTimeout(() => {
-        fetch("/api/state", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            budgets,
-            adjustments,
-            monthlyHistory,
-            capexComponents,
-            ordinaryRows,
-            investmentRows,
-          }),
-        })
-          .then((response) => {
-            if (!response.ok) toast("Salvataggio SQLite non riuscito");
-            else refreshSqlSummaries(version);
-          })
-          .catch(() => {
-            apiAvailable = false;
-            toast("Connessione SQLite non disponibile");
-          });
-      }, 120);
+      Object.entries({ budgets, adjustments, "monthly-history": monthlyHistory,
+        capex: capexComponents, "ordinary-rows": ordinaryRows, "investment-rows": investmentRows })
+        .forEach(([key, value]) => localStorage.setItem(`wg-mockup-${key}`, JSON.stringify(value)));
+    } catch {
+      saveStatus("Spazio browser esaurito: salvataggio locale non riuscito", true);
     }
+    saveStatus(apiAvailable ? "Salvataggio in corso…" : "Solo browser · SQLite non disponibile", !apiAvailable);
+    saveQueue = saveQueue.then(async () => {
+      if (!apiAvailable) return false;
+      try {
+        const response = await fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json", "If-Match": serverToken }, body: JSON.stringify(payload) });
+        if (!response.ok) {
+          const result = await response.json();
+          throw new Error(result.error || "Salvataggio non riuscito");
+        }
+        serverToken = response.headers.get("ETag");
+        if (version === stateVersion) saveStatus(`Salvato in SQLite · ${new Date().toLocaleTimeString("it-IT")}`);
+        return true;
+      } catch (error) {
+        saveStatus(`Non salvato in SQLite · ${error.message}. Premi Salva per riprovare.`, true);
+        return false;
+      }
+    });
+    return saveQueue;
+  }
+  async function saveExplicit(message) {
+    const saved = await persist();
+    toast(saved ? message : "Salvataggio SQLite non riuscito: consulta il messaggio in alto e riprova.");
+    return saved;
   }
   async function hydrateFromServer() {
+    $("main").inert = true;
     try {
       const response = await fetch("/api/state", {
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) return;
+      if (!response.ok) throw new Error("Caricamento SQLite non riuscito");
       const state = await response.json();
       apiAvailable = true;
+      serverToken = response.headers.get("ETag");
       if (Array.isArray(state.budgets) && state.budgets.length) {
         budgets = state.budgets;
         normalizeBudgetStates();
@@ -321,15 +347,19 @@ import {
         investmentRows = state.investmentRows || investmentRows;
         ensureCompleteDemoRows();
         ensureAllBudgetPlanning();
+        initializeWorkflow(budgets, monthlyHistory, adjustments);
         currentBudget = budgets[0];
         currentChild = currentBudget.children[0];
         renderBudgets();
-        persist();
+        saveStatus("Dati caricati da SQLite");
       } else {
-        persist();
+        await persist();
       }
     } catch {
       apiAvailable = false;
+      saveStatus("Solo browser · avvia start.bat per salvare in SQLite", true);
+    } finally {
+      $("main").inert = false;
     }
   }
   function toast(message) {
@@ -355,7 +385,7 @@ import {
     const status = $("#filter-status").value;
     const search = $("#budget-search").value;
     $("#budget-list").innerHTML = budgetRowsHtml(
-      budgets,
+      budgets.filter((budget) => (!$("#filter-from").value || `${budget.year}-12-31` >= $("#filter-from").value) && (!$("#filter-to").value || `${budget.year}-01-01` <= $("#filter-to").value)),
       structure,
       status,
       search,
@@ -443,6 +473,8 @@ import {
   }
 
   function openAnalysis(budgetId) {
+    editingRequestId = null;
+    monthlyAdjustmentsVisible = false;
     currentBudget = budgets.find((b) => b.id === budgetId) || budgets[0];
     currentChild = currentBudget.children[0];
     analysisScope = "budget";
@@ -486,7 +518,10 @@ import {
       currentBudget.frequency === "Vita utile"
         ? "Annuale"
         : currentBudget.frequency;
+    $("#analysis-from").value = `${currentBudget.year}-01-01`;
+    $("#analysis-to").value = `${currentBudget.year}-12-31`;
     $("#analysis-duration").value = "12 mesi (anno)";
+    $("#toggle-monthly-adjustments").setAttribute("aria-expanded", "false");
     $("#monthly-panel").hidden = false;
     $("#capex-panel").hidden = true;
     renderAnalysis();
@@ -494,7 +529,7 @@ import {
   }
 
   function renderAnalysis() {
-    const planning = currentBudget.planning;
+    const planning = effectivePlanning(currentBudget, adjustments);
     $("#level2-panel").hidden = planning.mode === "single-level";
     $("#level1-panel").classList.toggle("panel-wide", planning.mode === "single-level");
     const validation = planningValidation(planning);
@@ -572,6 +607,7 @@ import {
     renderPlanningCrudControls();
     renderMonthly();
     renderAdjustments();
+    renderWorkflow();
   }
 
   function renderPlanningCrudControls() {
@@ -581,12 +617,8 @@ import {
     $("#add-monthly").disabled = planning.mode !== "single-level" && !planning.level1.length;
   }
 
-  async function refreshSqlSummaries(version = stateVersion) {
-    void version;
-  }
-
   function renderMonthly() {
-    const planning = currentBudget.planning;
+    const planning = !canEditBudget(currentBudget) && !monthlyAdjustmentsVisible ? effectivePlanning(currentBudget, adjustments) : currentBudget.planning;
     const investment = currentBudget.type === "Investimento";
     $("#adjustment-help").hidden = !monthlyAdjustmentsVisible;
     $("#monthly-panel table").classList.toggle("adjustment-mode", monthlyAdjustmentsVisible);
@@ -613,8 +645,8 @@ import {
         matchesSearch([level.code, level.name], search),
     );
     $("#grand-total").textContent =
-      `TOTALE BUDGET: ${euro.format(planningTotal(planning))}`;
-    $("#monthly-head").innerHTML = `<th>Codice</th><th>Descrizione</th>${months.map((month) => `<th>${month}</th>${monthlyAdjustmentsVisible ? `<th class="adjustment-head">Rett. ${month}</th>` : ""}`).join("")}<th class="num">${investment ? `Totale ${monthlyYear}` : "Totale base"}</th>${monthlyAdjustmentsVisible ? '<th class="num">Rettifiche</th><th class="num">Budget aggiornato</th>' : ""}<th class="num">${investment ? "Differenza piano" : "Differenza"}</th><th>Azioni</th>`;
+      `BUDGET AGGIORNATO: ${euro.format(planningTotal(effectivePlanning(currentBudget, adjustments)))}`;
+    $("#monthly-head").innerHTML = `<th>Codice</th><th>Descrizione</th>${months.map((month) => `<th>${month}</th>${monthlyAdjustmentsVisible ? `<th class="adjustment-head">Rett. ${month}</th>` : ""}`).join("")}<th class="num">${investment ? `Totale ${monthlyYear}` : monthlyAdjustmentsVisible || canEditBudget(currentBudget) ? "Totale base" : "Totale aggiornato"}</th>${monthlyAdjustmentsVisible ? '<th class="num">Rettifiche</th><th class="num">Budget aggiornato</th>' : ""}<th class="num">${investment ? "Differenza piano" : "Differenza"}</th><th>Azioni</th>`;
     $("#monthly-table").innerHTML = hierarchyMonthlyRowsHtml(
       planning,
       validation,
@@ -649,7 +681,8 @@ import {
     const button = $("#submit-monthly-adjustments");
     button.hidden = !monthlyAdjustmentsVisible;
     const count = currentAdjustmentDrafts().length;
-    button.textContent = count ? `Invia rettifica (${count})` : "Invia rettifica";
+    button.textContent = count ? `Salva / invia rettifica (${count})` : "Salva / invia rettifica";
+    $("#cancel-request-edit").hidden = !editingRequestId;
     button.title = count ? "Apri il box per motivare e inviare la richiesta" : "Modifica prima almeno una cella nelle colonne Rett.";
     button.disabled = count === 0;
   }
@@ -693,7 +726,7 @@ import {
           : level.months;
         const values = base.map((value, month) => {
           const change = changes.find((item) => item.level.id === level.id && item.month === month);
-          return Math.round((Number(value) + (change ? change.after : planningAdjustment(level.id, month).approved)) * 100) / 100;
+          return Math.round((Number(value) + (change ? change.after : planningAdjustment(level.id, month, monthlyYear).approved)) * 100) / 100;
         });
         return { id: level.id, code: level.code, name: level.name, values };
       }),
@@ -701,21 +734,133 @@ import {
   }
 
   function renderMonthlyHistory() {
-    const entries = monthlyHistory.filter((entry) => entry.budgetId === currentBudget.id);
-    $("#monthly-history").innerHTML = entries.length ? entries.map((entry) => {
-      const status = adjustments.find((item) => item.requestId === entry.id)?.status || "In approvazione";
-      const rows = entry.rows.map((row) => {
-        const values = row.values.map((value, month) => {
-          const changed = entry.changes.some((item) => item.levelId === row.id && item.month === month);
-          return `<td class="num${changed ? " history-changed" : ""}">${euroCents.format(value)}</td>`;
-        }).join("");
-        const total = row.values.reduce((sum, value) => sum + Number(value), 0);
-        return `<tr><td>${escapeHtml(row.code)}</td><td>${escapeHtml(row.name)}</td>${values}<td class="num">${euroCents.format(total)}</td></tr>`;
-      }).join("");
-      return `<details class="monthly-history-entry"><summary>${escapeHtml(new Date(entry.createdAt).toLocaleString("it-IT"))} · ${escapeHtml(entry.year)} · ${escapeHtml(status)} · ${escapeHtml(entry.reason)}</summary><p>Versione della tabella 3 proposta con la richiesta ${escapeHtml(entry.id)}. Le celle evidenziate sono state rettificate.</p><div class="table-wrap"><table><thead><tr><th>Codice</th><th>Descrizione</th>${months.map((month) => `<th>${month}</th>`).join("")}<th>Totale</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
-    }).join("") : '<p class="muted">Nessuna versione salvata della tabella 3 per questo budget.</p>';
+    $("#monthly-history-list").innerHTML = requestHistoryHtml(currentBudget, monthlyHistory, $("#request-search").value);
   }
 
+  function renderWorkflow() {
+    $("#budget-workflow-panel").innerHTML = workflowPanelHtml(currentBudget);
+    $("#budget-workflow-history").innerHTML = workflowHistoryHtml(currentBudget);
+    const editable = canEditBudget(currentBudget);
+    $("#save-analysis").textContent = editable ? "Salva bozza" : "Salva stato";
+    $("#analysis-status").textContent = currentBudget.workflowState;
+    $("#analysis-status").className = `status ${statusClass(currentBudget.workflowState)}`;
+    $("#analysis-code").textContent = `V${currentBudget.version} · R${currentBudget.revision}`;
+    const canAdjust = currentBudget.workflowState === "Approvato" && currentBudget.isOfficial;
+    $("#toggle-monthly-adjustments").disabled = !canAdjust;
+    $("#submit-monthly-adjustments").disabled ||= !canAdjust;
+    $("#analysis-frequency").disabled = !editable;
+    $("#analysis-from").disabled = true;
+    $("#analysis-to").disabled = true;
+    ["#level-table", "#voice-table", "#monthly-table"].forEach((selector) => {
+      $$(selector + " input, " + selector + " button").forEach((control) => {
+        if (!control.matches("[data-adjust-month]")) control.disabled ||= !editable;
+        else control.disabled ||= !canAdjust;
+      });
+    });
+    ["add-l1", "add-l2", "add-monthly", "distribute-l1", "distribute-l2"].forEach((id) => { $("#" + id).disabled ||= !editable; });
+    renderMonthlyHistory();
+  }
+
+  async function executeWorkflow(scope, id, action, note = "") {
+    if (workflowBusy) return;
+    const previous = captureWorkflow();
+    try {
+      workflowBusy = true;
+      $("main").inert = true;
+      const budget = scope === "budget" ? budgets.find((item) => item.id === id) : currentBudget;
+      if (scope === "budget") transitionBudget(budget, action, budgets, adjustments, note);
+      else {
+        const request = monthlyHistory.find((item) => item.id === id && item.budgetId === budget.id);
+        if (!request) throw new Error("Rettifica non trovata.");
+        transitionRequest(budget, request, action, adjustments, monthlyHistory, note);
+      }
+      renderAnalysis();
+      renderBudgets();
+      if (!await saveExplicit("Operazione salvata in SQLite")) restoreWorkflow(previous);
+    } catch (error) { toast(error.message); }
+    finally { workflowBusy = false; $("main").inert = false; }
+  }
+
+  document.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-workflow-action]");
+    if (!button || workflowBusy) return;
+    const { workflowScope: scope, workflowId: id, workflowAction: action } = button.dataset;
+    const request = monthlyHistory.find((item) => item.id === id);
+    if (scope === "request" && action === "edit") {
+      if (request?.status !== "Bozza" || !currentBudget.isOfficial) return toast("Puoi modificare una bozza sulla versione ufficiale.");
+      [...adjustmentDrafts].forEach(([key, value]) => { if (value.budgetId === currentBudget.id) adjustmentDrafts.delete(key); });
+      editingRequestId = id;
+      monthlyYear = request.year;
+      request.changes.forEach((change) => {
+        const approved = approvedDelta(currentBudget, adjustments, change.levelId, change.year, change.month);
+        adjustmentDrafts.set(adjustmentDraftKey(change.levelId, change.month, change.year), {
+          budgetId: currentBudget.id, levelId: change.levelId, month: change.month, year: change.year,
+          raw: decimalInput.format(approved + change.amount),
+        });
+      });
+      monthlyAdjustmentsVisible = true;
+      $("#toggle-monthly-adjustments").setAttribute("aria-expanded", "true");
+      renderAnalysis();
+      $("#submit-monthly-adjustments").scrollIntoView({ block: "center" });
+      toast("Modifica le celle Rett. e premi Salva / invia rettifica");
+      return;
+    }
+    if (scope === "request" && action === "delete") {
+      if (request?.status !== "Bozza") return toast("Solo le bozze possono essere eliminate.");
+      if (!await askConfirmation("Eliminare questa bozza di rettifica?")) return;
+      monthlyHistory = monthlyHistory.filter((item) => item.id !== id);
+      adjustments = adjustments.filter((item) => item.requestId !== id);
+      if (editingRequestId === id) clearRequestEdit();
+      renderAnalysis();
+      await saveExplicit("Bozza di rettifica eliminata");
+      return;
+    }
+    if (action === "reject") {
+      workflowNoteContext = { scope, id, action };
+      $("#workflow-note").value = "";
+      $("#workflow-note-modal").classList.add("open");
+      $("#workflow-note-modal").setAttribute("aria-hidden", "false");
+      $("#workflow-note").focus();
+      return;
+    }
+    await executeWorkflow(scope, id, action);
+  });
+
+  function clearRequestEdit() {
+    editingRequestId = null;
+    [...adjustmentDrafts].forEach(([key, value]) => { if (value.budgetId === currentBudget.id) adjustmentDrafts.delete(key); });
+  }
+  function closeWorkflowNote() {
+    workflowNoteContext = null;
+    $("#workflow-note-modal").classList.remove("open");
+    $("#workflow-note-modal").setAttribute("aria-hidden", "true");
+  }
+  function askConfirmation(message) {
+    $("#workflow-confirm-message").textContent = message;
+    $("#workflow-confirm-modal").classList.add("open");
+    $("#workflow-confirm-modal").setAttribute("aria-hidden", "false");
+    $("#cancel-workflow-confirm").focus();
+    return new Promise((resolve) => { confirmationResolver = resolve; });
+  }
+  function closeConfirmation(accepted = false) {
+    $("#workflow-confirm-modal").classList.remove("open");
+    $("#workflow-confirm-modal").setAttribute("aria-hidden", "true");
+    confirmationResolver?.(accepted);
+    confirmationResolver = null;
+  }
+  $("#cancel-workflow-confirm").addEventListener("click", () => closeConfirmation());
+  $("#workflow-confirm-modal").addEventListener("click", (event) => { if (event.target.id === "workflow-confirm-modal") closeConfirmation(); });
+  $("#workflow-confirm-form").addEventListener("submit", (event) => { event.preventDefault(); closeConfirmation(true); });
+  $("#cancel-workflow-note").addEventListener("click", closeWorkflowNote);
+  $("#workflow-note-modal").addEventListener("click", (event) => { if (event.target.id === "workflow-note-modal") closeWorkflowNote(); });
+  $("#workflow-note-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!workflowNoteContext || !$("#workflow-note").value.trim()) return;
+    const { scope, id, action } = workflowNoteContext;
+    const note = $("#workflow-note").value.trim();
+    closeWorkflowNote();
+    await executeWorkflow(scope, id, action, note);
+  });
   function capexForCurrent() {
     if (currentBudget.type !== "Investimento") return [];
     const allowedProjects = new Set(
@@ -1330,6 +1475,7 @@ import {
 
   function openEdit(type, budgetId) {
     const budget = budgets.find((b) => b.id === budgetId);
+    if (budget && !canEditBudget(budget)) return toast("Solo le bozze possono essere modificate.");
     editing = { type, budgetId };
     $("#edit-modal-title").textContent =
       type === "new" ? "Crea nuovo budget" : `Modifica budget ${budget.name}`;
@@ -1340,12 +1486,12 @@ import {
         ? `<option value="${escapeHtml(associatedStructure)}" selected>${escapeHtml(associatedStructure)}</option>`
         : "";
     $("#edit-modal-body").innerHTML = `
-      <div class="field"><label for="edit-year">Anno</label><input id="edit-year" name="year" type="number" value="${budget?.year || 2027}" required></div>
+      <div class="field"><label for="edit-year">Anno</label><input id="edit-year" name="year" type="number" min="2000" max="2100" value="${budget?.year || 2027}" ${budget ? "readonly" : ""} required></div>
       <div class="field"><label for="edit-name">Nome budget</label><input id="edit-name" name="name" value="${escapeHtml(budget?.name || "NUOVO BUDGET")}" required></div>
-      <div class="field"><label for="edit-version">Versione</label><input id="edit-version" name="version" type="number" value="${budget?.version || 1}" required></div>
-      <div class="field"><label for="edit-revision">Revisione</label><input id="edit-revision" name="revision" type="number" value="${budget?.revision || 0}" required></div>
+      <div class="field"><label for="edit-version">Versione</label><input id="edit-version" name="version" type="number" min="1" value="${budget?.version || 1}" readonly required></div>
+      <div class="field"><label for="edit-revision">Revisione</label><input id="edit-revision" name="revision" type="number" value="${budget?.revision || 0}" readonly required></div>
       <div class="field"><label for="edit-frequency">Periodicità</label><select id="edit-frequency" name="frequency"><option>Annuale</option><option>Mensile</option><option>Trimestrale</option><option>Vita utile</option></select></div>
-      <div class="field"><label for="edit-type">Tipo budget</label><select id="edit-type" name="budgetType"><option>Ordinario</option><option>Investimento</option></select></div>
+      <div class="field"><label for="edit-type">Tipo budget</label><select id="edit-type" name="budgetType" ${budget ? "disabled" : ""}><option>Ordinario</option><option>Investimento</option></select></div>
       <div class="field full"><label for="edit-associated-structure">Struttura analitica associata</label><select id="edit-associated-structure" name="associatedStructure"><option value="">Seleziona una struttura</option>${associatedStructures.map((structure) => `<option value="${structure}">${structure}</option>`).join("")}${legacyStructureOption}</select></div>
       <div class="field"><label for="edit-state">Stato</label><select id="edit-state" name="state"><option>Attivo</option><option>Disattivo</option></select></div>
     `;
@@ -1366,7 +1512,7 @@ import {
     editing = null;
   }
 
-  function copyBudget(budgetId) {
+  async function copyBudget(budgetId) {
     const sourceIndex = budgets.findIndex((budget) => budget.id === budgetId);
     if (sourceIndex < 0) return;
     const source = budgets[sourceIndex];
@@ -1374,35 +1520,35 @@ import {
       budgets,
       source,
       () => crypto.randomUUID(),
+      adjustments,
     );
     budgets.splice(sourceIndex + 1, 0, copied);
-    persist();
+    ensureAllBudgetPlanning();
+    initializeWorkflow(budgets, monthlyHistory, adjustments);
     renderBudgets();
-    toast(`${source.name} copiato nella versione ${copied.version}`);
+    await saveExplicit(`${source.name} copiato nella versione ${copied.version}`);
   }
 
-  function deleteBudget(budgetId) {
+  async function deleteBudget(budgetId) {
     const budget = budgets.find((item) => item.id === budgetId);
     if (!budget) return;
+    if (!canEditBudget(budget)) return toast("Puoi eliminare solo versioni in bozza.");
+    if (monthlyHistory.some((request) => request.budgetId === budgetId && request.status !== "Bozza")) return toast("La versione contiene richieste storicizzate e deve essere conservata.");
     if (budgets.length === 1) {
       toast("Deve rimanere almeno un budget");
       return;
     }
-    if (
-      !window.confirm(
-        `Eliminare ${budget.name}, versione ${budget.version}? L’operazione non può essere annullata.`,
-      )
-    )
-      return;
+    if (!await askConfirmation(`Eliminare ${budget.name}, versione ${budget.version}? Verranno eliminate anche le sue rettifiche in bozza.`)) return;
     budgets = budgets.filter((item) => item.id !== budgetId);
+    monthlyHistory = monthlyHistory.filter((item) => item.budgetId !== budgetId);
+    adjustments = adjustments.filter((item) => item.budgetId !== budgetId);
     if (currentBudget.id === budgetId) {
       currentBudget = budgets[0];
       currentChild = currentBudget.children[0];
       analysisScope = "budget";
     }
-    persist();
     renderBudgets();
-    toast(`${budget.name}, versione ${budget.version}, eliminato`);
+    await saveExplicit(`${budget.name}, versione ${budget.version}, eliminato`);
   }
 
   function adjustmentRows() {
@@ -1504,6 +1650,7 @@ import {
       `Importo ripartito: ${new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(sum)} · ${$$(".distribution-amount").length} scadenze`;
   }
   function openRedistribution(rowId) {
+    if (!canEditBudget(currentBudget)) return toast("Le variazioni di un budget approvato passano dalle rettifiche.");
     redistributionRowId = rowId;
     const row = planningLevel(rowId);
     if (!row) return;
@@ -1530,6 +1677,7 @@ import {
     redistributionRowId = null;
   }
   function applyDistribution() {
+    if (!canEditBudget(currentBudget)) return;
     const row = planningLevel(redistributionRowId);
     if (!row) return;
     const rawTotal = $("#dist-total").value;
@@ -1608,15 +1756,15 @@ import {
   $("#budget-search").addEventListener("input", renderBudgets);
   $("#level-search").addEventListener("input", renderAnalysis);
   $("#voice-search").addEventListener("input", renderAnalysis);
-  $("#monthly-search").addEventListener("input", renderMonthly);
+  $("#monthly-search").addEventListener("input", renderAnalysis);
   $("#monthly-year").addEventListener("change", (event) => {
     monthlyYear = Number(event.target.value);
-    renderMonthly();
+    renderAnalysis();
   });
   $("#toggle-monthly-adjustments").addEventListener("click", () => {
     monthlyAdjustmentsVisible = !monthlyAdjustmentsVisible;
     $("#toggle-monthly-adjustments").setAttribute("aria-expanded", String(monthlyAdjustmentsVisible));
-    renderMonthly();
+    renderAnalysis();
   });
   $("#show-monthly-history").addEventListener("click", () => {
     const panel = $("#monthly-history");
@@ -1629,8 +1777,8 @@ import {
     if (result.error) return toast(result.error);
     if (!result.changes.length) return toast("Modifica almeno una cella di rettifica.");
     $("#adjustment-reason-summary").innerHTML =
-      `<p>${result.changes.length} ${result.changes.length === 1 ? "mese modificato" : "mesi modificati"} per ${escapeHtml(currentBudget.name)}, anno ${monthlyYear}. La richiesta resterà in approvazione.</p><ul>${result.changes.map(({ level, month, before, after }) => `<li>${escapeHtml(level.code)} · ${escapeHtml(level.name)} · ${months[month]}: ${euroCents.format(before)} → ${euroCents.format(after)}</li>`).join("")}</ul>`;
-    $("#adjustment-reason").value = "";
+      `<p>${result.changes.length} ${result.changes.length === 1 ? "mese modificato" : "mesi modificati"} · ${escapeHtml(currentBudget.name)} · ${monthlyYear}. Salva una bozza o invia la richiesta.</p><ul>${result.changes.map(({ level, month, amount }) => `<li>${escapeHtml(level.code)} · ${months[month]}: variazione ${euroCents.format(amount)}</li>`).join("")}</ul>`;
+    $("#adjustment-reason").value = monthlyHistory.find((item) => item.id === editingRequestId)?.reason || "";
     $("#adjustment-reason-modal").classList.add("open");
     $("#adjustment-reason-modal").setAttribute("aria-hidden", "false");
     $("#adjustment-reason").focus();
@@ -1644,69 +1792,55 @@ import {
   $("#adjustment-reason-modal").addEventListener("click", (event) => {
     if (event.target.id === "adjustment-reason-modal") closeAdjustmentReason();
   });
-  $("#adjustment-reason-form").addEventListener("submit", (event) => {
+  $("#adjustment-reason-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (workflowBusy) return;
     const reason = $("#adjustment-reason").value.trim();
-    if (!reason) {
-      $("#adjustment-reason").setCustomValidity("Scrivi la motivazione della rettifica.");
-      $("#adjustment-reason").reportValidity();
-      return;
-    }
+    if (!reason) return;
     const result = collectAdjustmentChanges();
-    if (result.error || !result.changes.length) return toast(result.error || "Nessuna modifica da inviare.");
-    const requestId = `RET-${Date.now()}`;
-    const createdAt = new Date().toISOString();
-    monthlyHistory.unshift(createMonthlySnapshot(requestId, reason, createdAt, result.changes));
-    result.changes.forEach(({ level, year, month, before, after, amount }, index) => {
-      adjustments.unshift({
-        id: `${requestId}-${index + 1}`,
-        requestId,
-        budgetId: currentBudget.id,
-        scope: "planning",
-        nature: "cost",
-        rowId: level.id,
-        rowLabel: `${level.code} · ${level.name}`,
-        year,
-        month,
-        amount,
-        before,
-        after,
-        reason,
-        attachment: "",
-        status: "In approvazione",
-        createdAt,
-      });
-      adjustmentDrafts.delete(adjustmentDraftKey(level.id, month, year));
-    });
-    persist();
-    closeAdjustmentReason();
-    renderAnalysis();
-    $("#monthly-history").hidden = false;
-    $("#show-monthly-history").setAttribute("aria-expanded", "true");
-    renderMonthlyHistory();
-    toast("Rettifica inviata in approvazione e salvata nello storico");
+    if (result.error || !result.changes.length) return toast(result.error || "Nessuna modifica da salvare.");
+    const beforeSave = captureWorkflow();
+    try {
+      const previous = monthlyHistory.find((item) => item.id === editingRequestId);
+      if (previous && previous.status !== "Bozza") throw new Error("La richiesta non è più modificabile.");
+      const requestId = previous?.id || `RET-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
+      const at = new Date().toISOString();
+      const request = { ...createMonthlySnapshot(requestId, reason, at, result.changes),
+        status: "Bozza", createdAt: previous?.createdAt || at, createdBy: previous?.createdBy || ACTOR,
+        events: [...(previous?.events || []), { action: previous ? "edit" : "create", actor: ACTOR, at }] };
+      request.changes = result.changes.map(({ level, year, month, before, after, amount }) => ({ levelId: level.id, year, month, before, after, amount }));
+      validateRequest(currentBudget, request, adjustments, monthlyHistory);
+      const nextAdjustments = adjustments.filter((item) => item.requestId !== requestId);
+      nextAdjustments.push(...requestRecords(request, currentBudget));
+      const nextRequests = monthlyHistory.filter((item) => item.id !== requestId);
+      nextRequests.unshift(request);
+      if (event.submitter?.value === "submit") transitionRequest(currentBudget, request, "submit", nextAdjustments, nextRequests);
+      adjustments = nextAdjustments;
+      monthlyHistory = nextRequests;
+      result.changes.forEach(({ level, year, month }) => adjustmentDrafts.delete(adjustmentDraftKey(level.id, month, year)));
+      editingRequestId = null;
+      closeAdjustmentReason();
+      renderAnalysis();
+      $("#monthly-history").hidden = false;
+      $("#show-monthly-history").setAttribute("aria-expanded", "true");
+      workflowBusy = true;
+      $("main").inert = true;
+      if (!await saveExplicit(request.status === "Bozza" ? "Bozza di rettifica salvata" : "Rettifica inviata in approvazione")) restoreWorkflow(beforeSave);
+    } catch (error) { toast(error.message); }
+    finally { workflowBusy = false; $("main").inert = false; }
   });
   $("#adjustment-reason").addEventListener("input", (event) => event.target.setCustomValidity(""));
+  $("#cancel-request-edit").addEventListener("click", () => { clearRequestEdit(); renderAnalysis(); });
+  $("#request-search").addEventListener("input", renderMonthlyHistory);
   $("#capex-search").addEventListener("input", renderCapex);
   $("#create-budget").addEventListener("click", () => openEdit("new"));
   $("#back-management").addEventListener("click", () => showPage("management"));
-  $("#save-analysis").addEventListener("click", () => {
-    const validation = planningValidation(currentBudget.planning);
-    if (!validation.valid) {
-      if (validation.allocationPercentError) {
-        const difference = Math.abs(100 - validation.allocationPercent);
-        toast(`Per salvare, le percentuali di Livello 1 devono totalizzare 100%. Da sistemare: ${difference.toFixed(2)} punti.`);
-      } else if (validation.level2AllocationErrors.length) {
-        toast("Le percentuali sul totale dei figli devono quadrarsi con la quota del rispettivo padre.");
-      } else if (validation.level2TotalPercentError) {
-        toast(`Le percentuali sul totale del Livello 2 devono totalizzare 100%. Attuale: ${validation.level2TotalPercent.toFixed(2)}%.`);
-      } else {
-        toast("Correggi le percentuali dei figli e i mesi evidenziati in rosso prima di salvare");
-      }
-      return;
-    }
+  $("#save-analysis").addEventListener("click", () => saveExplicit(canEditBudget(currentBudget) ? "Bozza salvata in SQLite" : "Stato salvato in SQLite"));
+  $("#analysis-frequency").addEventListener("change", () => {
+    if (!canEditBudget(currentBudget)) return;
+    currentBudget.frequency = $("#analysis-frequency").value;
     persist();
-    toast("Pianificazione budget salvata");
+    renderBudgets();
   });
   $("#analysis-type").addEventListener("change", (event) => {
     const next = budgets.find((budget) => budget.type === event.target.value);
@@ -1742,6 +1876,7 @@ import {
     $("#planning-modal-body").querySelector("input,select")?.focus();
   };
   const openPlanningForm = (kind, id = null) => {
+    if (!canEditBudget(currentBudget)) return toast("Il budget è consultabile: crea una rettifica o una nuova versione.");
     const planning = currentBudget.planning;
     const isNew = !id;
     const field = (label, name, value, type = "number", attrs = "") => `<div class="field"><label for="planning-${name}">${label}</label><input id="planning-${name}" name="${name}" type="${type}" value="${escapeHtml(value)}" ${attrs}></div>`;
@@ -1825,6 +1960,7 @@ import {
     );
   };
   $("#distribute-l1").addEventListener("click", () => {
+    if (!canEditBudget(currentBudget)) return;
     const planning = currentBudget.planning;
     const levels = planning.level1;
     if (!levels.length) return;
@@ -1845,6 +1981,7 @@ import {
     toast("Percentuali Livello 1 ripartite equamente sul 100%");
   });
   $("#distribute-l2").addEventListener("click", () => {
+    if (!canEditBudget(currentBudget)) return;
     const planning = currentBudget.planning;
     let distributed = false;
     planning.level1.forEach((parent) => {
@@ -1880,6 +2017,7 @@ import {
   planningModal.addEventListener("click", (event) => { if (event.target === planningModal) closePlanningModal(); });
   $("#planning-form").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!canEditBudget(currentBudget)) return;
     const context = planningModalContext;
     if (!context) return;
     const data = new FormData(event.currentTarget);
@@ -1970,15 +2108,16 @@ import {
     }
     closePlanningModal(); renderAnalysis(); persist();
   });
-  [$("#level-table"), $("#voice-table"), $("#monthly-table")].forEach((table) => table.addEventListener("click", (event) => {
+  [$("#level-table"), $("#voice-table"), $("#monthly-table")].forEach((table) => table.addEventListener("click", async (event) => {
     const editButton = event.target.closest("[data-planning-edit]");
     if (editButton) { event.stopPropagation(); openPlanningForm(editButton.dataset.planningEdit, editButton.dataset.planningId); return; }
     const deleteButton = event.target.closest("[data-planning-delete]");
     if (deleteButton) {
+      if (!canEditBudget(currentBudget)) return;
       event.stopPropagation();
       const kind = deleteButton.dataset.planningDelete; const id = deleteButton.dataset.planningId; const planning = currentBudget.planning;
       if (kind === "l1" && planning.level2.some((level) => level.parentId === id)) { toast("Elimina prima gli elementi di Livello 2 collegati"); return; }
-      if (!window.confirm("Vuoi eliminare questo elemento dal budget?")) return;
+      if (!await askConfirmation("Vuoi eliminare questo elemento dal budget?")) return;
       if (kind === "l1") {
         planning.level1 = planning.level1.filter((level) => level.id !== id);
         if (planning.mode === "single-level") syncSingleLevelBudgetPercentages(planning);
@@ -2057,6 +2196,7 @@ import {
     selected.budget = Math.round((baseTotal * percent / 100) * 100) / 100;
   };
   $("#level-table").addEventListener("change", (event) => {
+    if (!canEditBudget(currentBudget)) return;
     if (event.target.closest("[data-l1-budget]")) updateLevel1Budget(event);
     if (event.target.closest("[data-l1-percent]")) updateLevel1Percent(event);
     resizeDescendantMonths(currentBudget.planning);
@@ -2094,6 +2234,7 @@ import {
     level.totalPercent = percent;
   };
   $("#voice-table").addEventListener("change", (event) => {
+    if (!canEditBudget(currentBudget)) return;
     if (event.target.closest("[data-l2-total-percent]")) updateLevel2TotalPercent(event);
     resizeDescendantMonths(currentBudget.planning);
     renderAnalysis();
@@ -2116,7 +2257,7 @@ import {
   $$("[data-nature-tab]").forEach((button) =>
     button.addEventListener("click", () => {
       currentNature = button.dataset.natureTab;
-      renderMonthly();
+      renderAnalysis();
     }),
   );
   $("#monthly-table").addEventListener("click", (event) => {
@@ -2187,9 +2328,10 @@ import {
       }
       return;
     }
+    if (!canEditBudget(currentBudget)) return;
     if (!event.target.closest("[data-plan-month]")) return;
     if (!updateMonthlyValue(event)) {
-      renderMonthly();
+      renderAnalysis();
       return;
     }
     renderAnalysis();
@@ -2246,11 +2388,18 @@ import {
     toast("Rettifica inviata ad approvazione");
   });
 
-  $("#edit-form").addEventListener("submit", (event) => {
+  $("#edit-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget));
+    data.name = data.name.trim().toUpperCase();
+    if (!data.name) return toast("Inserisci il nome del budget.");
+    if (editing.type !== "new" && !canEditBudget(budgets.find((item) => item.id === editing.budgetId))) return toast("Solo le bozze sono modificabili.");
+    const existing = budgets.find((item) => item.id === editing.budgetId);
+    data.budgetType ||= existing?.type;
+    if (editing.type === "new") data.version = Math.max(0, ...budgets.filter((item) => item.year === Number(data.year) && item.name.trim().toUpperCase() === data.name).map((item) => item.version)) + 1;
+    if (budgets.some((item) => item.id !== editing.budgetId && item.year === Number(data.year) && item.name.trim().toUpperCase() === data.name && item.version === Number(data.version))) return toast("Esiste già questa combinazione di anno, nome e versione.");
     if (editing.type === "new") {
-      const id = `bdg${Date.now()}`;
+      const id = `bdg-${crypto.randomUUID()}`;
       budgets.push({
         id,
         year: Number(data.year),
@@ -2287,10 +2436,11 @@ import {
       });
     }
     ensureFundingSources();
-    persist();
+    ensureAllBudgetPlanning();
+    initializeWorkflow(budgets, monthlyHistory, adjustments);
     renderBudgets();
     closeModal();
-    toast("Modifiche salvate");
+    await saveExplicit("Bozza budget salvata");
   });
   $("#close-modal").addEventListener("click", closeModal);
   $("#cancel-modal").addEventListener("click", closeModal);
@@ -2409,6 +2559,8 @@ import {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      closeConfirmation();
+      closeWorkflowNote();
       closePlanningModal();
       closeModal();
       closeVoiceModal();

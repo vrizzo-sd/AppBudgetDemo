@@ -1,12 +1,12 @@
 # Budget analitico Wingest — specifica funzionale e tecnica per l'integrazione ERP
 
-Versione di riferimento: mockup locale modulare aggiornato il 29/09/2026. Le regole della sezione 2 sostituiscono la precedente impostazione basata su voci, sottoconti, costo/ricavo e tabella CAPEX. Le sezioni tecniche legacy successive restano solo come materiale storico da rivalutare prima dell'integrazione.
+Versione di riferimento: mockup locale modulare aggiornato il 15/10/2026. La sezione 2.3 disciplina il nuovo workflow e prevale sui riferimenti precedenti al salvataggio bloccato e alla revisione manuale. Le regole della sezione 2 sostituiscono la precedente impostazione basata su voci, sottoconti, costo/ricavo e tabella CAPEX. Le sezioni tecniche legacy successive restano solo come materiale storico da rivalutare prima dell'integrazione.
 
 ## 1. Obiettivo e confini
 
 Realizzare nell'ERP una gestione di budget analitici **ordinari** e **di investimento** basata sui livelli della struttura analitica e sulla pianificazione mensile. Non sono previste nature costo/ricavo, voci libere o sottoconti nella nuova pagina. Il mockup HTML è il riferimento visuale e interattivo; il codice Python/JavaScript e i file SQLite sono un ambiente dimostrativo, non un'architettura prescritta per Wingest.
 
-Il mockup conserva i dati legacy di rettifiche e CAPEX per non perderli durante la revisione, ma non li espone nella nuova pagina. Il consuntivo non è implementato.
+Il mockup conserva i dati legacy CAPEX senza esporli nella nuova pagina. Le rettifiche della pianificazione mensile seguono il workflow della sezione 2.3. Il consuntivo non è implementato.
 
 ### Artefatti consegnati
 
@@ -34,7 +34,7 @@ La prima pagina presenta una sola **riga verde per ogni versione del budget**. N
 | --- | --- |
 | 1. Livello 1 | Codice, descrizione, budget editabile e percentuale sul totale generale. Le percentuali di tutte le righe devono totalizzare il 100%; ogni modifica resta sulla riga scelta e il messaggio segnala l'eventuale eccedenza o quota mancante. È il punto iniziale di inserimento del budget. |
 | 2. Livello 2 | Copia del comportamento di Livello 1: una sola percentuale editabile sul totale generale e budget calcolato sul totale. Ogni figlio resta collegato a un solo padre, il cui budget di Livello 1 è vincolante: la somma delle percentuali dei figli deve quindi quadrarsi con la quota percentuale del padre. La somma globale delle percentuali di Livello 2 deve essere 100%; le modifiche non cambiano le altre righe. In caso di eccedenza o quota mancante le celle restano editabili, le righe del gruppo padre diventano rosse e un messaggio indica percentuale e importo esatti da correggere. |
-| 3. Pianificazione mensile | Per l'ordinario una riga per elemento di Livello 2; per l'investimento una riga per elemento di Livello 1. Dodici mesi editabili, totale e differenza rispetto al budget calcolato. La differenza rende la riga rossa e blocca il salvataggio. |
+| 3. Pianificazione mensile | Per l'ordinario una riga per elemento di Livello 2; per l'investimento una riga per elemento di Livello 1. Dodici mesi editabili, totale e differenza rispetto al budget calcolato. La differenza rende la riga rossa e blocca l'invio in approvazione; la bozza resta salvabile. |
 
 La regola unica della percentuale sul totale è intenzionale e riutilizzabile per eventuali livelli gerarchici aggiuntivi; il legame con il padre serve a verificare la quadratura, non introduce una seconda percentuale.
 
@@ -48,7 +48,19 @@ La modifica diretta di un mese nella tabella 3 aggiorna subito il budget della v
 
 Nel Livello 1 delle commesse di investimento, l'inserimento degli importi determina il budget complessivo come somma delle voci e ricalcola tutte le percentuali sul nuovo totale. Dopo aver definito il totale, la modifica di una percentuale ricalcola l'importo della voce su quel totale di riferimento; le altre voci restano invariate finché l'utente non ne modifica le percentuali. Un totale percentuale diverso dal 100% segnala la quota da riallineare. La logica dei budget ordinari a due livelli resta distinta.
 
-L'eliminazione di una riga mensile non elimina l'elemento analitico: rimuove la sua pianificazione e rende il budget non salvabile fino alla successiva aggiunta e quadratura. La copia di una versione conserva gerarchia, percentuali e mesi. Più versioni possono essere contemporaneamente `Attivo`.
+L'eliminazione di una riga mensile non elimina l'elemento analitico: rimuove la sua pianificazione e impedisce l'invio in approvazione fino alla successiva aggiunta e quadratura. La copia di una versione conserva gerarchia, percentuali e mesi. Più versioni possono essere contemporaneamente `Attivo`.
+
+### 2.3 Versioni, rettifiche e revisioni approvate
+
+Il budget distingue l'iter (`Bozza`, `In approvazione`, `Approvato`, `Respinto`) dal flag `Attivo/Disattivo`. Versione, revisione, stato, indicazione ufficiale e comandi sono raccolti in una barra compatta sopra i filtri, senza KPI. Sotto la tabella 3 i pannelli Revisioni approvate e Iter del budget occupano rispettivamente tre quarti e un quarto della larghezza; su schermi stretti sono disposti in verticale. Le fotografie delle revisioni evidenziano le differenze rispetto alla revisione precedente: verde per aumenti e rosso per diminuzioni, sia nei mesi sia nei totali annuali, con delta firmato. La revisione iniziale non è colorata. Solo le bozze sono modificabili ed eliminabili; l'invio richiede quadrature corrette. Le richieste inviate si possono ritirare; i rifiuti richiedono un motivo. Il mockup usa `Utente demo` per tutte le operazioni, senza simulare ruoli ERP.
+
+La prima approvazione congela `baseSnapshot` e crea la revisione 0, comprensiva della pianificazione completa. Ogni richiesta di rettifica approvata genera esattamente una nuova revisione immutabile e aggiorna contestualmente mesi, livelli superiori, totale e percentuali; la base rimane invariata. Il budget aggiornato include solo le rettifiche approvate. Bozze, richieste pendenti e rifiuti non modificano i totali ufficiali. I trasferimenti possono includere più celle con importo netto zero; un mese non può diventare negativo. Lo storno è una nuova richiesta con segno opposto.
+
+Le rettifiche si salvano in bozza con motivazione obbligatoria; lo storico consente ricerca, modifica, eliminazione delle bozze, invio, ritiro, approvazione e rifiuto motivato. Le richieste concluse e le revisioni non si modificano o eliminano. Non si possono aprire richieste sovrapposte sulla stessa cella. Per investimenti anno e mese identificano la scadenza della pianificazione, distinta dai pagamenti CAPEX legacy.
+
+Un'unica versione è ufficiale per nome, anno, struttura associata e tipo. La nuova versione nasce disattiva e in bozza, incorpora una sola volta le variazioni approvate della sorgente, rigenera i riferimenti tecnici e riparte dalla revisione 0. Lo storico e le richieste pendenti restano sulla versione di origine. L'approvazione della nuova versione sostituisce l'ufficiale senza cancellare quella precedente. Nuove rettifiche si applicano solo alla versione ufficiale; su versioni precedenti resta possibile ritirare o respingere richieste pendenti.
+
+La persistenza autorevole del mockup è lo stato JSON in `budget_mockup.db`: comprende richieste, registro delle variazioni, eventi decisionali, base e fotografie delle revisioni. Il database normalizzato è ancora una proiezione legacy: non espone il nuovo workflow. Il server verifica transizioni, quadrature, unicità dell'ufficiale, coerenza dei registri e immutabilità degli approvati. La conferma di salvataggio segue la risposta del server; un ETag impedisce sovrascritture da schede obsolete e la coda client mantiene l'ordine delle scritture. Non si tratta di integrazione Wingest già validata.
 
 ## Appendice legacy non attiva
 

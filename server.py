@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import mimetypes
 import sqlite3
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+from threading import RLock
 
 from scripts.init_normalized_db import build_database
+from scripts.budget_workflow_validation import validate_state
 
 
 ROOT = Path(__file__).resolve().parent
@@ -19,7 +22,13 @@ NORMALIZED_DB_PATH = DATA_DIR / "budget_wingest.db"
 SCHEMA_PATH = ROOT / "schema.sql"
 HOST = "127.0.0.1"
 PORT = 8793
-MAX_BODY_BYTES = 2 * 1024 * 1024
+MAX_BODY_BYTES = 20 * 1024 * 1024
+STATE_LOCK = RLock()
+
+
+def state_etag(payload: dict) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return '"' + hashlib.sha256(encoded.encode("utf-8")).hexdigest() + '"'
 
 
 def connect() -> sqlite3.Connection:
@@ -99,7 +108,9 @@ def write_state(payload: dict) -> None:
                 """,
                 (encoded,),
             )
-    sync_normalized_database()
+            # Build the query projection before committing the authoritative state.
+            # A projection failure rolls the state transaction back.
+            build_database(DB_PATH, NORMALIZED_DB_PATH, replace=True, state=payload)
 
 
 def reset_state() -> None:
@@ -114,12 +125,14 @@ class BudgetHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         print(f"[{self.log_date_time_string()}] {format % args}")
 
-    def send_json(self, status: int, payload: dict) -> None:
+    def send_json(self, status: int, payload: dict, etag: str | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if etag:
+            self.send_header("ETag", etag)
         self.end_headers()
         self.wfile.write(body)
 
@@ -127,7 +140,9 @@ class BudgetHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/state":
-            self.send_json(200, read_state())
+            with STATE_LOCK:
+                state = read_state()
+                self.send_json(200, state, state_etag(state))
             return
         if path == "/api/analysis":
             budget_key = parse_qs(parsed.query).get("budgetId", [""])[0]
@@ -159,8 +174,21 @@ class BudgetHandler(BaseHTTPRequestHandler):
         if not required.issubset(payload):
             self.send_json(400, {"error": "Stato incompleto", "required": sorted(required)})
             return
-        write_state(payload)
-        self.send_json(200, {"ok": True})
+        with STATE_LOCK:
+            previous = read_state()
+            if self.headers.get("If-Match") != state_etag(previous):
+                self.send_json(409, {"error": "I dati sono cambiati in un'altra scheda. Ricarica la pagina prima di continuare"})
+                return
+            try:
+                validate_state(payload, previous)
+                write_state(payload)
+            except (ValueError, KeyError, TypeError, IndexError, OverflowError) as error:
+                self.send_json(400, {"error": f"Dati non validi: {error}"})
+                return
+            except Exception:
+                self.send_json(500, {"error": "Salvataggio SQLite non riuscito. I dati precedenti sono conservati"})
+                return
+            self.send_json(200, {"ok": True}, state_etag(payload))
 
     def do_POST(self) -> None:
         if urlparse(self.path).path != "/api/reset":

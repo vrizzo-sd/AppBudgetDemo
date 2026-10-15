@@ -63,7 +63,40 @@ Nella schermata **Gestione Budget** ogni riga rappresenta una versione del budge
 
 La nuova **Redazione Budget Analitica** usa tre tabelle collegate. Per l'ordinario, il Livello 1 contiene il budget inserito dall'utente; il Livello 2 appartiene esplicitamente a un padre e il suo budget è calcolato dalla percentuale sul padre. Sono mostrate sia la percentuale sul padre sia quella sul totale generale. La pianificazione mensile contiene una riga per ogni elemento di Livello 2. Se la somma dei mesi non coincide con il budget calcolato, la riga diventa rossa e il salvataggio viene bloccato. Cambiando il budget del padre si ricalcolano i figli, ma non i mesi.
 
-Nella tabella 3, **Rettifica** mostra le celle mensili delle variazioni. Si possono modificare più mesi e più righe; **Invia rettifica** apre un box con motivazione obbligatoria. La richiesta viene salvata **In approvazione** e non modifica il budget ufficiale. La cella interessata resta bloccata finché la richiesta è pendente. **Storico** mostra, per ogni richiesta salvata, la motivazione e una copia della tabella mensile proposta, con le celle variate evidenziate. Lo storico è conservato nello stato locale `data/budget_mockup.db` quando si usa `server.py`. Il mockup non dispone ancora di un'azione per approvare o respingere queste richieste.
+Nella tabella 3, **Rettifica** mostra le celle mensili delle variazioni sulla versione ufficiale approvata. Le colonne `Rett.` contengono la variazione cumulata rispetto al budget iniziale, con importi italiani (es. `1.000,50`). **Salva / invia rettifica** apre il box con motivazione obbligatoria: puoi salvare una bozza oppure inviare in approvazione. **Rettifiche e storico** consente ricerca, lettura, modifica ed eliminazione delle bozze, invio, ritiro, approvazione e rifiuto motivato. Le celle con richieste pendenti sono bloccate. Una richiesta può includere più celle, anche con variazione complessiva zero per uno spostamento tra mesi o voci. Solo l'approvazione cambia i totali ufficiali e crea una revisione immutabile, una per richiesta.
+
+## Versioni, approvazioni e revisioni
+
+- **Salva bozza** conserva anche un budget incompleto. Le modifiche alle griglie vengono autosalvate come stato di lavoro; i messaggi distinguono salvataggio in corso, conferma SQLite ed errore. L'invio in approvazione richiede livelli, percentuali e mesi quadrati.
+- Gli stati dell'iter sono **Bozza**, **In approvazione**, **Approvato**, **Respinto** e sono distinti da **Attivo/Disattivo**. Il mockup usa lo stesso **Utente demo** per richiedere e decidere: non implementa autorizzazioni ERP.
+- Il budget inviato è consultabile: **Ritira** lo riporta in bozza; **Respingi** richiede una motivazione e **Riapri bozza** consente le correzioni.
+- **Approva e rendi ufficiale** congela il budget iniziale e crea la revisione 0. Esiste una sola versione ufficiale per nome budget, anno, struttura analitica e tipo. L'approvazione di una nuova versione disattiva la precedente, conservandola.
+- Le versioni approvate e le richieste concluse non si modificano né si eliminano. Una correzione passa da una nuova rettifica, anche con segno negativo per stornare una variazione precedente. Le revisioni conservano la pianificazione completa, inclusi gli anni degli investimenti, autore, data e richiesta collegata.
+- **Copia** genera una nuova bozza disattiva, con numero di versione successivo e revisione 0. Consolida una sola volta le rettifiche approvate e rigenera gli identificativi dei livelli e i collegamenti padre/figlio. Richieste in bozza/pendenti e storico restano sulla versione di origine.
+- La barra compatta sopra i filtri mostra **Versione**, **Revisione**, stato e indicazione **Versione ufficiale**, con i relativi comandi. Non sono presenti KPI a riquadri. Sotto la tabella 3, lo storico è affiancato in due pannelli: **Revisioni approvate** su tre quarti della larghezza e **Iter del budget** su un quarto; su schermi stretti i pannelli si dispongono in verticale. Nelle revisioni le celle e i totali annuali cambiati rispetto alla revisione precedente sono verdi per gli aumenti e rossi per le diminuzioni, con differenza firmata e valori prima/dopo nel suggerimento; la revisione iniziale resta neutra. Nella vista mensile normale di un budget approvato vengono mostrati i valori aggiornati; la vista Rettifica distingue valori iniziali e variazioni.
+- I dati precedenti vengono conservati e caricati come bozze: un vecchio flag `Attivo` non equivale a un'approvazione. Anno e tipo si scelgono alla creazione, mentre versione e revisione sono gestite dal sistema.
+- Lo stato completo, comprese revisioni e richieste, è salvato in `data/budget_mockup.db`. `budget_wingest.db` resta la proiezione SQL legacy e non rappresenta il nuovo workflow né tutta la pianificazione gerarchica.
+- Se due schede modificano lo stesso stato, il server rifiuta una scrittura obsoleta e chiede di ricaricare. I salvataggi della stessa scheda vengono eseguiti in ordine. Un errore della proiezione SQL non conferma né sostituisce lo stato autorevole.
+
+Per usare questa versione, avvia (o riavvia se era già in esecuzione) `start.bat` e apri `http://127.0.0.1:8793`. Con la sola apertura di `index.html`, il salvataggio resta nel browser ed è segnalato esplicitamente.
+
+### Verifica funzionale
+
+1. Crea o copia un budget; modifica l'intestazione e i livelli. Salva anche una bozza non quadrata e verifica che l'invio sia bloccato.
+2. Completa le quadrature, invia, prova ritiro/rifiuto e infine approva. Controlla revisione 0 e protezione dei dati.
+3. In Rettifica modifica una o più celle, salva una bozza, riaprila e modifica la proposta; inviala, ritirala e inviala nuovamente.
+4. Approva la richiesta: controlla riepiloghi, livelli superiori e nuova revisione. Prova anche un rifiuto motivato e uno storno.
+5. Copia la versione aggiornata e approva la copia: deve restare un solo ufficiale e la nuova base deve includere le rettifiche una sola volta.
+6. Ricarica la pagina e verifica permanenza di valori, richieste, motivazioni e revisioni. Elimina solo bozze di prova tramite la conferma nella pagina.
+
+Test automatici (Node.js e Python):
+
+```powershell
+node --test tests/*.test.mjs
+python -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+I test di persistenza usano database temporanei e non modificano i dati di lavoro.
 
 Per l'investimento/commessa il mockup usa un solo livello: nella prima tabella compaiono le righe di budget (per esempio costo personale o costo impianto), la seconda informa che non è previsto un Livello 2 e la terza mantiene la pianificazione mensile. Non esistono più le nature Costo/Ricavo, le voci e i sottoconti della precedente proposta. Tutte e tre le tabelle offrono lettura, aggiunta da elementi configurati, modifica e rimozione; codici e descrizioni non sono testo libero. Non esiste una colonna Azioni: selezionando una o più righe si attivano i comandi **Modifica** ed **Elimina** nell'intestazione della tabella. Un secondo clic su una riga selezionata la deseleziona. Senza selezione le tabelle mostrano tutte le righe; la selezione di uno o più Livelli 1 filtra l'unione dei figli collegati nel Livello 2 e la selezione di uno o più figli filtra le relative pianificazioni mensili. La cancellazione di una pianificazione rende il budget incompleto e ne impedisce il salvataggio finché la riga non viene riaggiunta e riallineata.
 
